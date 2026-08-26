@@ -1,5 +1,3 @@
-version: 1
-
 # Each top-level key is a GitHub REST API resource and the fields below it are
 # that resource's fields, spelled exactly as the API spells them. Fields left
 # out of this file are not managed: ghs never touches them.

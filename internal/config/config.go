@@ -14,9 +14,6 @@ import (
 	"github.com/kota65535/ghs/internal/schema"
 )
 
-// Version is the only settings.yml format version this build understands.
-const Version = 1
-
 // DefaultPath is where ghs looks for the settings file.
 const DefaultPath = ".github/settings.yml"
 
@@ -56,36 +53,25 @@ func Load(path string, opts Options) (*Config, error) {
 	return cfg, nil
 }
 
-// file mirrors the settings file layout. Resources are kept as raw YAML nodes
-// so that no field is coerced into a Go type before validation.
-type file struct {
-	Version   *int                      `yaml:"version"`
-	Resources map[string]map[string]any `yaml:",inline"`
-}
-
 // Parse validates settings file contents.
 func Parse(b []byte, opts Options) (*Config, error) {
-	var f file
+	// Resources are decoded as raw YAML so that no field is coerced into a Go
+	// type before validation.
+	var resources map[string]map[string]any
+
 	dec := yaml.NewDecoder(strings.NewReader(string(b)))
 	dec.KnownFields(true)
-	if err := dec.Decode(&f); err != nil {
+	if err := dec.Decode(&resources); err != nil {
 		return nil, fmt.Errorf("parse: %w", err)
 	}
-
-	if f.Version == nil {
-		return nil, fmt.Errorf("version is required (expected %d)", Version)
-	}
-	if *f.Version != Version {
-		return nil, fmt.Errorf("unsupported version %d (this build understands %d)", *f.Version, Version)
-	}
-	if len(f.Resources) == 0 {
+	if len(resources) == 0 {
 		return nil, errors.New("no resources declared")
 	}
 
-	cfg := &Config{Declared: make(map[string]map[string]any, len(f.Resources))}
+	cfg := &Config{Declared: make(map[string]map[string]any, len(resources))}
 	var problems []string
 
-	for _, name := range sortedKeys(f.Resources) {
+	for _, name := range sortedKeys(resources) {
 		resource, ok := schema.Lookup(name)
 		if !ok {
 			problems = append(problems, fmt.Sprintf("%s: unknown resource (this build manages: %s)",
@@ -93,7 +79,7 @@ func Parse(b []byte, opts Options) (*Config, error) {
 			continue
 		}
 
-		declared := f.Resources[name]
+		declared := resources[name]
 		if len(declared) == 0 {
 			problems = append(problems, fmt.Sprintf("%s: no fields declared", name))
 			continue

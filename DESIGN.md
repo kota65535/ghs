@@ -8,8 +8,6 @@ GitHub リポジトリ設定を宣言的に管理する小さな CLI ツール�
 
 ```yaml
 # .github/settings.yml
-version: 1
-
 repository:
   has_issues: true
   has_projects: true
@@ -31,7 +29,7 @@ repository:
 
 `repository` の中身は `PATCH /repos/{owner}/{repo}` のボディと 1:1。将来 `rulesets:` を足すときも同じ原則で、対応する API のボディをそのまま書く。
 
-`version` は現状 `1` のみ。それ以外はロード時エラー。
+`version:` のようなフォーマット版のキーは置かない。0.x の段階で互換性を約束しておらず、今は何も区別していない。必要になった時点で「キーが無ければ現行の解釈」として後から足せるので、先回りして書かせる理由がない。
 
 ## 設計の核: map ベースで持つ
 

@@ -57,7 +57,7 @@ var testRepo = resource.Repo{Owner: "kota65535", Name: "ghs"}
 
 func TestComputePlansFindsDifferences(t *testing.T) {
 	client := &fakeClient{current: map[string]any{"has_issues": true, "allow_auto_merge": false}}
-	cfg := mustConfig(t, "version: 1\nrepository:\n  has_issues: true\n  allow_auto_merge: true\n")
+	cfg := mustConfig(t, "repository:\n  has_issues: true\n  allow_auto_merge: true\n")
 
 	resources, err := computePlans(context.Background(), client, testRepo, cfg)
 	if err != nil {
@@ -76,7 +76,7 @@ func TestComputePlansFindsDifferences(t *testing.T) {
 
 func TestApplySendsWholeDeclarationOnce(t *testing.T) {
 	client := &fakeClient{current: map[string]any{"has_issues": true, "allow_auto_merge": false}}
-	cfg := mustConfig(t, "version: 1\nrepository:\n  has_issues: true\n  allow_auto_merge: true\n")
+	cfg := mustConfig(t, "repository:\n  has_issues: true\n  allow_auto_merge: true\n")
 
 	resources, err := computePlans(context.Background(), client, testRepo, cfg)
 	if err != nil {
@@ -102,7 +102,7 @@ func TestApplySendsWholeDeclarationOnce(t *testing.T) {
 
 func TestApplyDoesNothingWithoutChanges(t *testing.T) {
 	client := &fakeClient{current: map[string]any{"has_issues": true}}
-	cfg := mustConfig(t, "version: 1\nrepository:\n  has_issues: true\n")
+	cfg := mustConfig(t, "repository:\n  has_issues: true\n")
 
 	resources, err := computePlans(context.Background(), client, testRepo, cfg)
 	if err != nil {
@@ -127,7 +127,7 @@ func TestApplyReportsAPIFailure(t *testing.T) {
 		current:  map[string]any{"has_issues": false},
 		patchErr: io.ErrUnexpectedEOF,
 	}
-	cfg := mustConfig(t, "version: 1\nrepository:\n  has_issues: true\n")
+	cfg := mustConfig(t, "repository:\n  has_issues: true\n")
 
 	resources, err := computePlans(context.Background(), client, testRepo, cfg)
 	if err != nil {

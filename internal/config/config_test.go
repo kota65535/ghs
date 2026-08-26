@@ -21,7 +21,6 @@ func mustParse(t *testing.T, yaml string) *Config {
 
 func TestParseKeepsOnlyDeclaredFields(t *testing.T) {
 	cfg := mustParse(t, `
-version: 1
 repository:
   has_issues: true
   delete_branch_on_merge: true
@@ -38,7 +37,7 @@ repository:
 
 func TestParseNormalizesValues(t *testing.T) {
 	// Numbers must come out as float64 so they compare equal to API responses.
-	cfg, err := Parse([]byte("version: 1\nrepository:\n  has_issues: true\n"), Options{})
+	cfg, err := Parse([]byte("repository:\n  has_issues: true\n"), Options{})
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
@@ -47,25 +46,15 @@ func TestParseNormalizesValues(t *testing.T) {
 	}
 }
 
-func TestParseRejectsMissingOrWrongVersion(t *testing.T) {
-	if _, err := parse(t, "repository:\n  has_issues: true\n", Options{}); err == nil {
-		t.Error("Parse succeeded without a version")
-	}
-	_, err := parse(t, "version: 2\nrepository:\n  has_issues: true\n", Options{})
-	if err == nil || !strings.Contains(err.Error(), "unsupported version") {
-		t.Errorf("err = %v, want an unsupported version error", err)
-	}
-}
-
 func TestParseRejectsUnknownResource(t *testing.T) {
-	_, err := parse(t, "version: 1\nrulesets:\n  foo: bar\n", Options{})
+	_, err := parse(t, "rulesets:\n  foo: bar\n", Options{})
 	if err == nil || !strings.Contains(err.Error(), "unknown resource") {
 		t.Errorf("err = %v, want an unknown resource error", err)
 	}
 }
 
 func TestParseRejectsUnknownField(t *testing.T) {
-	_, err := parse(t, "version: 1\nrepository:\n  has_discusions: true\n", Options{})
+	_, err := parse(t, "repository:\n  has_discusions: true\n", Options{})
 	if err == nil || !strings.Contains(err.Error(), "not a writable field") {
 		t.Errorf("err = %v, want a typo to be rejected", err)
 	}
@@ -76,26 +65,26 @@ func TestParseAcceptsFieldsPatchedIntoTheDescription(t *testing.T) {
 	// request body schema, so it reaches the field definitions through the
 	// hand-maintained patch rather than the generated part. It is validated
 	// like any other field.
-	cfg := mustParse(t, "version: 1\nrepository:\n  has_discussions: true\n")
+	cfg := mustParse(t, "repository:\n  has_discussions: true\n")
 	if cfg.Declared["repository"]["has_discussions"] != true {
 		t.Errorf("declared = %+v, want has_discussions kept", cfg.Declared["repository"])
 	}
 
-	_, err := parse(t, "version: 1\nrepository:\n  has_discussions: sure\n", Options{})
+	_, err := parse(t, "repository:\n  has_discussions: sure\n", Options{})
 	if err == nil || !strings.Contains(err.Error(), "expected boolean") {
 		t.Errorf("err = %v, want the patched field type-checked too", err)
 	}
 }
 
 func TestParseRejectsWrongType(t *testing.T) {
-	_, err := parse(t, "version: 1\nrepository:\n  has_issues: yes-please\n", Options{})
+	_, err := parse(t, "repository:\n  has_issues: yes-please\n", Options{})
 	if err == nil || !strings.Contains(err.Error(), "expected boolean") {
 		t.Errorf("err = %v, want a type error", err)
 	}
 }
 
 func TestParseRejectsValueOutsideEnum(t *testing.T) {
-	_, err := parse(t, "version: 1\nrepository:\n  squash_merge_commit_title: TITLE\n", Options{})
+	_, err := parse(t, "repository:\n  squash_merge_commit_title: TITLE\n", Options{})
 	if err == nil || !strings.Contains(err.Error(), "is not one of") {
 		t.Errorf("err = %v, want an enum error", err)
 	}
@@ -108,7 +97,7 @@ func TestParseAcceptsNullToClearAField(t *testing.T) {
 	// homepage and description are the repository fields where clearing the
 	// value is a thing anyone actually wants to do.
 	for _, name := range []string{"homepage", "description"} {
-		cfg := mustParse(t, "version: 1\nrepository:\n  "+name+": null\n")
+		cfg := mustParse(t, "repository:\n  "+name+": null\n")
 
 		value, present := cfg.Declared["repository"][name]
 		if !present {
@@ -125,8 +114,8 @@ func TestParsePassesNullThroughWhateverTheFieldIs(t *testing.T) {
 	// it inconsistently, and refusing a null wrongly would leave no way to
 	// clear the field at all, so it is passed through and the API decides.
 	cases := map[string]string{
-		"enum":    "version: 1\nrepository:\n  squash_merge_commit_title: null\n",
-		"boolean": "version: 1\nrepository:\n  has_issues:\n",
+		"enum":    "repository:\n  squash_merge_commit_title: null\n",
+		"boolean": "repository:\n  has_issues:\n",
 	}
 
 	for name, yaml := range cases {
@@ -145,7 +134,6 @@ func TestParsePassesNullThroughWhateverTheFieldIs(t *testing.T) {
 
 func TestParseValidatesNestedObjects(t *testing.T) {
 	cfg := mustParse(t, `
-version: 1
 repository:
   security_and_analysis:
     secret_scanning:
@@ -158,7 +146,6 @@ repository:
 	}
 
 	_, err := parse(t, `
-version: 1
 repository:
   security_and_analysis:
     secret_scanning:
@@ -171,7 +158,6 @@ repository:
 
 func TestParseReportsEveryProblemAtOnce(t *testing.T) {
 	_, err := parse(t, `
-version: 1
 repository:
   has_issues: 3
   squash_merge_commit_title: NOPE
@@ -188,7 +174,7 @@ repository:
 }
 
 func TestParseRejectsEmptyFile(t *testing.T) {
-	if _, err := parse(t, "version: 1\n", Options{}); err == nil {
+	if _, err := parse(t, "", Options{}); err == nil {
 		t.Error("Parse succeeded with no resources declared")
 	}
 }
