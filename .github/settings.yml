@@ -1,0 +1,25 @@
+version: 1
+
+# Each top-level key is a GitHub REST API resource and the fields below it are
+# that resource's fields, spelled exactly as the API spells them. Fields left
+# out of this file are not managed: ghs never touches them.
+#
+# repository maps to PATCH /repos/{owner}/{repo}.
+repository:
+  description: Manage GitHub repository settings from a settings file
+  has_issues: true
+  has_projects: false
+  has_wiki: false
+  has_discussions: false
+
+  allow_squash_merge: true
+  allow_merge_commit: false
+  allow_rebase_merge: false
+  allow_auto_merge: true
+  allow_update_branch: true
+  delete_branch_on_merge: true
+
+  squash_merge_commit_title: PR_TITLE
+  squash_merge_commit_message: PR_BODY
+
+  web_commit_signoff_required: false
