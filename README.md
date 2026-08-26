@@ -148,4 +148,4 @@ go test ./...
 go generate ./...   # refresh the field definitions from the OpenAPI description
 ```
 
-[DESIGN.md](DESIGN.md) covers how the field definitions are generated and why the tool is built the way it is.
+[docs/design.md](docs/design.md) (Japanese) covers how the field definitions are generated and why the tool is built the way it is.
