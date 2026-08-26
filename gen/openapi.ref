@@ -1,0 +1,6 @@
+# The commit of github/rest-api-description that the generated field
+# definitions in internal/schema/fields_gen.go were produced from.
+# Renovate keeps this digest current; run `go generate ./...` after it changes.
+#
+# renovate: datasource=git-refs depName=https://github.com/github/rest-api-description branch=main
+fee3373e1517aa7a3510c5db165154f47baf8d97

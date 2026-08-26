@@ -1,0 +1,46 @@
+name: codegen
+
+# Regenerating means downloading a 13 MB API description, so this runs only
+# when something that feeds the generator changes -- most often a Renovate pull
+# request that moves the pinned commit in gen/openapi.ref without touching the
+# code it generates.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - gen/**
+      - internal/schema/fields_gen.go
+  pull_request:
+    paths:
+      - gen/**
+      - internal/schema/fields_gen.go
+
+permissions:
+  contents: read
+
+concurrency:
+  group: codegen-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - name: Regenerate
+        run: go generate ./...
+
+      - name: Check the committed output matches
+        run: |
+          if ! git diff --exit-code; then
+            echo
+            echo "The generated field definitions are out of date."
+            echo "Run 'go generate ./...' and commit the result."
+            exit 1
+          fi
