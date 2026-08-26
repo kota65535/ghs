@@ -9,7 +9,7 @@ Settings drift: someone flips a merge option in the UI and nobody notices. Put t
 With [mise](https://mise.jdx.dev):
 
 ```sh
-mise use -g ubi:kota65535/ghs
+mise use -g github:kota65535/ghs
 ```
 
 Or with Go:
@@ -102,7 +102,7 @@ jobs:
           private-key: ${{ secrets.SETTINGS_APP_PRIVATE_KEY }}
       - uses: jdx/mise-action@v4
         with:
-          tool_versions: ubi:kota65535/ghs 0.1.0
+          tool_versions: github:kota65535/ghs 0.1.0
 
       - if: github.event_name == 'pull_request'
         run: ghs plan --format markdown | gh pr comment "$PR" --body-file -
