@@ -24,8 +24,6 @@ Write the settings you care about:
 
 ```yaml
 # .github/settings.yml
-version: 1
-
 repository:
   has_issues: true
   has_wiki: false
