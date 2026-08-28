@@ -21,3 +21,57 @@ repository:
   squash_merge_commit_message: PR_BODY
 
   web_commit_signoff_required: false
+
+# The keys below are collections: a set of named things rather than one object,
+# so each is written as a sequence whose entries are the body that creates one.
+#
+# Declaring one of these keys puts the WHOLE set under management. An entry
+# GitHub has and this file does not is deleted, which the plan shows as a
+# removal before anything is sent. Leave a key out and ghs does not touch those
+# settings at all.
+
+# rulesets maps to POST /repos/{owner}/{repo}/rulesets.
+rulesets:
+  - name: example
+    target: branch
+    # evaluate records violations without blocking them. Switch to active to
+    # have the rules enforced.
+    enforcement: active
+    conditions:
+      ref_name:
+        include: ['~DEFAULT_BRANCH']
+        exclude: []
+    rules:
+      - type: deletion
+      - type: non_fast_forward
+      - type: pull_request
+        # These five parameters are all required together. A rule is described
+        # as a choice between two dozen shapes, so which fields one takes is
+        # left to the API to judge -- leave one out and the request comes back
+        # as "data matches no possible input" rather than as a named field.
+        parameters:
+          required_approving_review_count: 0
+          dismiss_stale_reviews_on_push: false
+          require_code_owner_review: false
+          require_last_push_approval: false
+          required_review_thread_resolution: false
+          allowed_merge_methods: ["merge"]
+
+# variables maps to POST /repos/{owner}/{repo}/actions/variables.
+#
+# Values appear in the plan as they are. A variable is where GitHub puts
+# configuration that is not secret, and hiding the values would take the point
+# out of reviewing a change to one. Secrets belong elsewhere: ghs does not
+# manage them.
+variables:
+  - name: AAA
+    value: hi
+  - name: EXAMPLE_VARIABLE
+    value: hello
+
+# environments maps to PUT /repos/{owner}/{repo}/environments/{name}, which
+# takes the name in the path. The name is written here all the same, because it
+# is what identifies the entry.
+environments:
+  - name: example
+    wait_timer: 0
