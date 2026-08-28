@@ -102,6 +102,7 @@ var generated = map[string]Resource{
 		Name: "environments",
 		Kind: KindCollection,
 		// from PUT /repos/{owner}/{repo}/environments/{environment_name}
+		// from POST /repos/{owner}/{repo}/environments/{environment_name}/variables
 		Fields: map[string]Field{
 			"deployment_branch_policy": {Type: "object", Fields: map[string]Field{
 				"custom_branch_policies": {Type: "boolean"},
@@ -109,7 +110,30 @@ var generated = map[string]Resource{
 			}},
 			"prevent_self_review": {Type: "boolean"},
 			"reviewers":           {Type: "array"},
-			"wait_timer":          {Type: "integer"},
+			"variables": {Type: "array", Elements: map[string]Field{
+				"name":  {Type: "string"},
+				"value": {Type: "string"},
+			}},
+			"wait_timer": {Type: "integer"},
+		},
+	},
+	"actions": {
+		Name: "actions",
+		Kind: KindObject,
+		// from PUT /repos/{owner}/{repo}/actions/permissions
+		// from PUT /repos/{owner}/{repo}/actions/permissions/workflow
+		// from PUT /repos/{owner}/{repo}/actions/permissions/selected-actions
+		// from PUT /repos/{owner}/{repo}/actions/permissions/fork-pr-contributor-approval
+		Fields: map[string]Field{
+			"allowed_actions":                  {Type: "string", Enum: []string{"all", "local_only", "selected"}},
+			"approval_policy":                  {Type: "string", Enum: []string{"all_external_contributors", "first_time_contributors", "first_time_contributors_new_to_github"}},
+			"can_approve_pull_request_reviews": {Type: "boolean"},
+			"default_workflow_permissions":     {Type: "string", Enum: []string{"read", "write"}},
+			"enabled":                          {Type: "boolean"},
+			"github_owned_allowed":             {Type: "boolean"},
+			"patterns_allowed":                 {Type: "array"},
+			"sha_pinning_required":             {Type: "boolean"},
+			"verified_allowed":                 {Type: "boolean"},
 		},
 	},
 }

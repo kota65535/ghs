@@ -26,7 +26,20 @@ type Field struct {
 	// unspecified (a free-form object), in which case the nested content is
 	// passed through without validation.
 	Fields map[string]Field
+
+	// Elements describes one entry of a collection nested inside this field.
+	//
+	// A list belonging to a resource is sometimes reached through an API of
+	// its own -- the variables of an environment are written one at a time --
+	// without thereby ceasing to be a field of that resource. Such a field is
+	// declared like any other list and the entries are matched by name, the
+	// same as a top-level collection. It is nil for every other field.
+	Elements map[string]Field
 }
+
+// IsCollection reports whether the field is a collection of named entries
+// rather than a plain value.
+func (f Field) IsCollection() bool { return f.Elements != nil }
 
 // Kind is the shape a resource takes in settings.yml.
 type Kind string
@@ -56,6 +69,19 @@ type Resource struct {
 
 // IsCollection reports whether the resource is a set of named elements.
 func (r Resource) IsCollection() bool { return r.Kind == KindCollection }
+
+// NestedCollections names the fields of this resource that are collections of
+// their own, in sorted order.
+func (r Resource) NestedCollections() []string {
+	var names []string
+	for name, field := range r.Fields {
+		if field.IsCollection() {
+			names = append(names, name)
+		}
+	}
+	sort.Strings(names)
+	return names
+}
 
 // Get returns the definition of a top-level field.
 func (r Resource) Get(name string) (Field, bool) {

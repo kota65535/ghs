@@ -63,6 +63,15 @@ type Change struct {
 	// Element names the collection element this change belongs to. It is empty
 	// for a single-object resource, which has no elements.
 	Element string
+
+	// Nested names the field of that element holding a collection of its own,
+	// and Entry the entry within it, when the change is about one. Both are
+	// empty otherwise.
+	//
+	// The path says as much, but only by spelling it out; keeping the parts
+	// means the report does not have to read its own paths back.
+	Nested string
+	Entry  string
 }
 
 // action is Action with the zero value read as ActionUpdate, so that a change

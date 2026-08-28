@@ -142,35 +142,57 @@ func writeResource(w io.Writer, group resourceGroup, options renderOptions) erro
 	if _, err := fmt.Fprintf(w, "%s %s: [\n", sign, group.resource); err != nil {
 		return err
 	}
-	for _, element := range group.elements {
-		if err := writeElement(w, element, options); err != nil {
+	return writeSequence(w, group.elements, "", options)
+}
+
+// writeSequence writes the entries of a collection as the sequence the
+// settings file writes it as, closing the bracket its caller opened.
+func writeSequence(w io.Writer, entries []elementGroup, indent string, options renderOptions) error {
+	for _, entry := range entries {
+		if err := writeElement(w, entry, indent+bodyIndent, options); err != nil {
 			return err
 		}
 	}
-	_, err := fmt.Fprintf(w, "%s]\n", closeIndent)
+	_, err := fmt.Fprintf(w, "%s%s]\n", indent, closeIndent)
 	return err
 }
 
 // writeElement writes one entry of a collection as the mapping it is written
 // as in the settings file.
-func writeElement(w io.Writer, element elementGroup, options renderOptions) error {
+//
+// An entry holding a collection of its own is written the same way, so this
+// calls itself for those: the variables of an environment are a sequence of
+// mappings under the environment, exactly as the environments are under the
+// repository.
+func writeElement(w io.Writer, element elementGroup, indent string, options renderOptions) error {
 	sign, color := marker(element.action)
-	if _, err := fmt.Fprintf(w, "%s%s {\n", bodyIndent, colorize(sign, color, options.color)); err != nil {
+	if _, err := fmt.Fprintf(w, "%s%s {\n", indent, colorize(sign, color, options.color)); err != nil {
 		return err
 	}
 
-	indent := bodyIndent + bodyIndent
+	body := indent + bodyIndent
 	if element.values != nil {
 		// An element arriving or going takes all of its fields with it, so
 		// they are listed out: which fields those are is the thing to review.
-		if err := writeValues(w, element.values, sign, color, indent, options); err != nil {
+		if err := writeValues(w, element.values, sign, color, body, options); err != nil {
 			return err
 		}
-	} else if err := writeElementChanges(w, element, indent, options); err != nil {
+	} else if err := writeElementChanges(w, element, body, options); err != nil {
 		return err
 	}
 
-	_, err := fmt.Fprintf(w, "%s%s},\n", bodyIndent, closeIndent)
+	for _, nested := range element.nested {
+		_, err := fmt.Fprintf(w, "%s%s %s: [\n",
+			body, colorize("~", ansiYellow, options.color), nested.field)
+		if err != nil {
+			return err
+		}
+		if err := writeSequence(w, nested.entries, body, options); err != nil {
+			return err
+		}
+	}
+
+	_, err := fmt.Fprintf(w, "%s%s},\n", indent, closeIndent)
 	return err
 }
 
@@ -242,6 +264,30 @@ func oneSided(c Change) (sign, color string, value any, ok bool) {
 	default:
 		return "", "", nil, false
 	}
+}
+
+// signOf is what a change to a whole entry amounts to: an entry that exists on
+// one side of the comparison only is arriving or going.
+func signOf(c Change) Action {
+	switch {
+	case c.CurrentMissing:
+		return ActionCreate
+	case c.DesiredMissing:
+		return ActionDelete
+	default:
+		return ActionUpdate
+	}
+}
+
+// onlyValue returns the whole entry when a change is about one arriving or
+// going rather than about a field within it.
+func onlyValue(c Change) (map[string]any, bool) {
+	_, _, value, ok := oneSided(c)
+	if !ok {
+		return nil, false
+	}
+	fields, ok := value.(map[string]any)
+	return fields, ok
 }
 
 // labelWidth is how wide the field names are once the colon that follows them
@@ -358,6 +404,8 @@ type jsonChange struct {
 	Action         Action `json:"action"`
 	Path           string `json:"path"`
 	Element        string `json:"element,omitempty"`
+	Nested         string `json:"nested,omitempty"`
+	Entry          string `json:"entry,omitempty"`
 	Current        any    `json:"current"`
 	Desired        any    `json:"desired"`
 	CurrentMissing bool   `json:"current_missing"`
@@ -380,6 +428,8 @@ func renderJSON(w io.Writer, changes []Change) error {
 			Action:         c.action(),
 			Path:           c.Path,
 			Element:        c.Element,
+			Nested:         c.Nested,
+			Entry:          c.Entry,
 			Current:        c.Current,
 			Desired:        c.Desired,
 			CurrentMissing: c.CurrentMissing,
@@ -501,6 +551,41 @@ type elementGroup struct {
 	// other, so only one of these is ever set.
 	fields []fieldChange
 	values map[string]any
+
+	// nested holds the collections the element owns, such as the variables of
+	// an environment.
+	nested []nestedGroup
+}
+
+// nestedGroup is a collection held by an element, and the entries of it that
+// are changing.
+type nestedGroup struct {
+	field   string
+	entries []elementGroup
+}
+
+// nest returns the group for a collection the element owns, adding it if this
+// is the first change seen for that field.
+func (g *elementGroup) nest(field string) *nestedGroup {
+	for i := range g.nested {
+		if g.nested[i].field == field {
+			return &g.nested[i]
+		}
+	}
+	g.nested = append(g.nested, nestedGroup{field: field})
+	return &g.nested[len(g.nested)-1]
+}
+
+// entry returns the group for one entry of the collection, adding it if this
+// is the first change seen for that entry.
+func (n *nestedGroup) entry(name string) *elementGroup {
+	for i := range n.entries {
+		if n.entries[i].name == name {
+			return &n.entries[i]
+		}
+	}
+	n.entries = append(n.entries, elementGroup{name: name, action: ActionUpdate})
+	return &n.entries[len(n.entries)-1]
 }
 
 // resourceGroup is everything happening under one top-level key.
@@ -539,6 +624,8 @@ func groupChanges(changes []Change) []resourceGroup {
 		}
 
 		element := group.element(c.Element)
+		elementPath := ElementPath(name, c.Element)
+
 		if action := c.action(); action == ActionCreate || action == ActionDelete {
 			element.action = action
 			// A create carries the declared element, a delete the current one.
@@ -552,8 +639,27 @@ func groupChanges(changes []Change) []resourceGroup {
 			}
 			continue
 		}
+
+		// A change to a collection the element owns belongs under that
+		// collection, not among the element's own fields.
+		if c.Nested != "" {
+			entry := element.nest(c.Nested).entry(c.Entry)
+			entryPath := ElementPath(elementPath+"."+c.Nested, c.Entry)
+
+			if value, present := onlyValue(c); present {
+				entry.action = signOf(c)
+				entry.values = value
+				continue
+			}
+			entry.fields = append(entry.fields, fieldChange{
+				label:  strings.TrimPrefix(c.Path, entryPath+"."),
+				change: c,
+			})
+			continue
+		}
+
 		element.fields = append(element.fields, fieldChange{
-			label:  strings.TrimPrefix(c.Path, ElementPath(name, c.Element)+"."),
+			label:  strings.TrimPrefix(c.Path, elementPath+"."),
 			change: c,
 		})
 	}

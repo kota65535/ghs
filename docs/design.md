@@ -4,7 +4,7 @@ GitHub リポジトリ設定を宣言的に管理する小さな CLI ツール�
 
 ## 基本方針
 
-**settings.yml は REST API のリクエストボディそのもの。** 独自の抽象を挟まない。トップレベルキーが API リソースに対応し、その下のフィールド名・値は GitHub REST API と完全に一致させる。ドキュメントは GitHub の API リファレンスがそのまま使える。
+**settings.yml は API の語彙でリソースの状態を書いたもの。** 独自の抽象を挟まない。トップレベルキーが API リソースに対応し、その下のフィールド名・値は GitHub REST API と完全に一致させる。ドキュメントは GitHub の API リファレンスがそのまま使える。
 
 ```yaml
 # .github/settings.yml
@@ -27,7 +27,7 @@ repository:
   web_commit_signoff_required: false
 ```
 
-`repository` の中身は `PATCH /repos/{owner}/{repo}` のボディと 1:1。将来 `rulesets:` を足すときも同じ原則で、対応する API のボディをそのまま書く。
+`repository` の中身は `PATCH /repos/{owner}/{repo}` のボディと 1:1 になっている。ただしこれは、リソースの状態が 1 回のリクエストで書き切れる場合にそう見えるというだけで、リクエストボディに合わせているわけではない。複数の API 呼び出しで到達する状態もあり、そのときの書き方は「リストを持つリソースと API の操作単位」の節で扱う。
 
 `version:` のようなフォーマット版のキーは置かない。0.x の段階で互換性を約束しておらず、今は何も区別していない。必要になった時点で「キーが無ければ現行の解釈」として後から足せるので、先回りして書かせる理由がない。
 
@@ -461,7 +461,118 @@ secrets は Phase 2 でも対象外とし、当面サポートしない。宣言
 
 **rulesets 一覧が `rules` / `conditions` を含むか。** 含むと分かれば要素ごとの GET を省ける。今は含まない前提で実装している。
 
+## リストを持つリソースと API の操作単位
+
+リソースがフィールドとしてリストを持つとき、API の作り方は 2 通りある。
+
+- **更新のたびに完全なリストを渡す。** `allowed_merge_methods` や `rules`、`reviewers` がこれにあたる
+- **リストの要素の追加・更新・削除に別の API を用意する。** variables や environment の variables がこれにあたる
+
+前者は要素が少なく短いリストに向く。長くなりうるリスト、あるいは要素ごとに権限や監査を分けたいリストでは後者が選ばれる。environment の variables に `POST /repos/{o}/{r}/environments/{env}/variables` という独立したパスがあるのはそのためで、**リストが environment のフィールドでなくなったわけではない**。
+
+したがって settings.yml では、どちらの API でも同じように書く。
+
+```yaml
+environments:
+  - name: production
+    wait_timer: 30
+    variables:
+      - name: DEPLOY_REGION
+        value: ap-northeast-1
+```
+
+`variables` は `PUT /repos/{o}/{r}/environments/{environment_name}` のリクエストボディには無い。それでも environment の状態の一部であり、宣言する側にとって `wait_timer` と区別する理由がない。差分を要素ごとの API 呼び出しに翻訳するのは ghs の仕事である。
+
+### 1 つの状態が複数のエンドポイントに散っている場合
+
+前節はリソースがリストを持つ場合だったが、リストでなくても同じことが起きる。リポジトリの Actions 設定は 4 つのパスに分かれている。
+
+- `PUT /repos/{o}/{r}/actions/permissions`: `enabled`、`allowed_actions`、`sha_pinning_required`
+- `PUT .../actions/permissions/workflow`: `default_workflow_permissions`、`can_approve_pull_request_reviews`
+- `PUT .../actions/permissions/fork-pr-contributor-approval`: `approval_policy`
+- `PUT .../actions/permissions/selected-actions`: `github_owned_allowed` ほか
+
+宣言する側から見れば「このリポジトリで Actions がどう動くか」という 1 つの状態なので、`actions:` の下に平坦に並べる。生成器の `operations` は同じリソース名の行を複数許し、フィールドはそれらの和になる。
+
+```yaml
+actions:
+  enabled: true
+  allowed_actions: all
+  sha_pinning_required: false
+  default_workflow_permissions: read
+  can_approve_pull_request_reviews: false
+```
+
+apply は、宣言されたフィールドを持つエンドポイントだけを呼ぶ。順序は `permissions` を先にする。どの action を選ぶかは、方針が `selected` になって初めて意味を持つため。
+
+フィールドとエンドポイントの対応表は `internal/resource/actions.go` に手書きする。生成されるフィールド定義との食い違いは、「生成された全フィールドがどれかのエンドポイントに属する」ことを確かめるテストで検出する。これがないと、GitHub が足したフィールドが settings.yml では受理されるのに送られない、という状態になる。
+
+#### 条件付きで存在しないエンドポイント
+
+`selected-actions` は `allowed_actions` が `selected` のときにしか存在せず、それ以外では GET が 409 を返す。同様に private リポジトリ限定の設定は public で 422 になる。
+
+これらは失敗ではなく「そこには何も無い」という応答なので、該当フィールドを現在値から落として続行する。宣言していれば `(missing)` として差分に出る。これは「宣言キーが GET レスポンスに存在しない場合は差分扱いにする」という既定の方針がそのまま効く形になっている。
+
+403 や 5xx は区別してエラーとして伝える。「設定が適用されない」ことと「読めない」ことは違う。
+
+#### 入れないと決めたエンドポイント
+
+`actions/permissions/artifact-and-log-retention` は入れない。唯一のフィールドが `days` という名前で、`actions:` の下に他のフィールドと並べると何の日数か読み取れない。API がパスの側に文脈を寄せている例であり、「API の語彙をそのまま書く」という方針は、フィールド名がその文脈を持ち歩いていることを前提にしている。前提が崩れる場合まで無理に適用しない。
+
+`actions/permissions/access` と `fork-pr-workflows-private-repos` も外した。private / internal 限定で、public リポジトリでは実測できないため。条件付きの仕組みには乗るので、必要になれば行を足すだけで入る。
+
+### 原則の言い直し
+
+「settings.yml は REST API のリクエストボディそのもの」という言い方は、Phase 1 の `repository` が 1 つの PATCH に対応していたから成り立っていた。コレクションを入れた時点でこれは正確でなくなっている。
+
+- `environments` の `name` はパスに入るので、どのリクエストボディにも存在しない
+- コレクションのトップレベルキー 1 つが、一覧・作成・更新・削除の 4 操作に対応する
+
+正確には、**トップレベルキーは管理対象のリソースを指し、その下はそのリソースを記述する API の語彙で書く**。何回 API を叩いてその状態に到達するかは実装の側の問題であって、宣言する側が知る必要はない。独自の抽象を挟まないという方針は変わらない。抽象を挟まない対象が「1 回のリクエスト」ではなく「リソースの状態」だというだけである。
+
+この読み方は Phase 3 の判断にも効く。`topics` は `PUT /repos/{o}/{r}/topics` という別の API を持つが、リポジトリの状態の一部なので `repository` の下に書ける。
+
+### 入れ子のコレクション
+
+`environments` の `variables` は、要素の中にあるコレクションとして実装する。
+
+**フィールド定義**は生成側で対応する。`gen/main.go` の `nestedOperations` に「どのリソースの、どのフィールドが、どの作成 API に対応するか」を書き、`POST /repos/{o}/{r}/environments/{environment_name}/variables` のリクエストボディから要素のフィールドを生成する。`schema.Field` に `Elements` を持たせ、非 nil なら入れ子コレクションとする。
+
+**検証**は外側と同じ規則を適用する。`name` 必須、重複エラー、`variables:`（null）はエラー、`variables: []` は全削除の宣言。トップレベルのコレクションと入れ子で規則が違う理由がないので、要素の検証は共通の関数に切り出す。
+
+**差分**では、入れ子のフィールドを通常の比較から除外し、name で突き合わせて別に比較する。パスは `environments["production"].variables["DEPLOY_REGION"].value` の 2 段になる。`Change` には親要素を指す `Element` に加えて、入れ子のフィールド名 `Nested` とエントリ名 `Entry` を持たせる。パスにも同じ情報は入っているが、表示のたびに自分の吐いたパスを読み返すことになるため、構造のまま持つ。
+
+入れ子の要素の増減は、トップレベルのような create・delete では**なく** update として扱う。片側にしか無い値（`CurrentMissing` / `DesiredMissing`）として表す。environment の変数が増えることは environment の変更であって、変数が独立したオブジェクトとして生まれるわけではない。ここを create として数えると「1 to create」が変数の数だけ出て、要約がリソースの数を語らなくなる。
+
+**表示**も外側と同じシーケンス形式にする。入れ子だけキー付き（`variables["X"]`）で出すと、settings.yml には無い形を見せることになる。
+
+```
+~ environments: [
+    ~ {
+          name: "production"
+        ~ variables: [
+            ~ {
+                  name:  "REGION"
+                ~ value: "ap-northeast-1" -> "us-east-1"
+              },
+            + {
+                + name:  "ADD"
+                + value: "new"
+              },
+          ]
+      },
+  ]
+```
+
+要素とエントリは同じ構造なので、描画も同じ関数が自分を呼ぶ形で書ける。
+
+**apply** は `Environments` の中に閉じ込める。`Create` と `Update` がどちらも「environment 本体を PUT してから変数を揃える」という同じ手順になるので、実体は 1 つにまとめる。変数の順序は create → update → delete で、トップレベルと同じく途中で失敗したときに余分が残る側に倒す。environment を先に作るのは、存在しない environment に変数を入れられないため。
+
+`Collection` interface は変えていない。入れ子は「そのリソースをどう更新するか」の内側の話であって、コレクションの扱い方そのものは変わらないため。
+
+要素の識別は各段で `name` のままでよい。変数は environment と名前の組で決まるが、入れ子の中では親が既に決まっている。
+
 ## Phase 3 以降
 
 - `teams`: 比較対象は `GET /orgs/{org}/teams/{slug}/repos` で確認できる**直接付与のみ**に限定する（継承・org ロール経由は対象外）
-- `topics`: `PUT /repos/{owner}/{repo}/topics` の別 API。順序に意味がない集合
+- `topics`: `PUT /repos/{owner}/{repo}/topics` の別 API だが、リポジトリの状態なので `repository` の下に書く。順序に意味がない集合なので、比較には集合としての扱いが要る

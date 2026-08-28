@@ -39,11 +39,67 @@ type operation struct {
 //
 // A collection is generated from the operation that creates one element,
 // because that request body is the list of fields an element may declare.
+//
+// Several lines may name the same resource, whose fields are then the union of
+// what those operations accept. GitHub spreads a repository's Actions settings
+// over a handful of endpoints, but they are one thing to declare.
 var operations = []operation{
 	{resource: "repository", path: "/repos/{owner}/{repo}", method: "patch", kind: "KindObject"},
 	{resource: "variables", path: "/repos/{owner}/{repo}/actions/variables", method: "post", kind: "KindCollection"},
 	{resource: "rulesets", path: "/repos/{owner}/{repo}/rulesets", method: "post", kind: "KindCollection"},
 	{resource: "environments", path: "/repos/{owner}/{repo}/environments/{environment_name}", method: "put", kind: "KindCollection"},
+
+	// The retention endpoint is left out: its only field is named "days",
+	// which says nothing about what it counts once it sits among the fields
+	// below. Writing the API's own names only works while those names carry
+	// their meaning with them.
+	{resource: "actions", path: "/repos/{owner}/{repo}/actions/permissions", method: "put", kind: "KindObject"},
+	{resource: "actions", path: "/repos/{owner}/{repo}/actions/permissions/workflow", method: "put", kind: "KindObject"},
+	{resource: "actions", path: "/repos/{owner}/{repo}/actions/permissions/selected-actions", method: "put", kind: "KindObject"},
+	{resource: "actions", path: "/repos/{owner}/{repo}/actions/permissions/fork-pr-contributor-approval", method: "put", kind: "KindObject"},
+}
+
+// resourceNames returns the resources to generate, in the order they are first
+// named above, so that regenerating produces the same file.
+func resourceNames() []string {
+	var names []string
+	seen := map[string]bool{}
+	for _, op := range operations {
+		if seen[op.resource] {
+			continue
+		}
+		seen[op.resource] = true
+		names = append(names, op.resource)
+	}
+	for _, nested := range nestedOperations {
+		if !seen[nested.parent] {
+			names = append(names, nested.parent)
+			seen[nested.parent] = true
+		}
+	}
+	return names
+}
+
+// nestedOperation identifies the operation that creates one entry of a
+// collection belonging to another resource.
+//
+// A list a resource owns is sometimes written one entry at a time through an
+// API of its own. That is a choice about how the list is updated, not about
+// whether it belongs to the resource, so the entries are declared as a field
+// of it and generated from the body that creates one.
+type nestedOperation struct {
+	parent string // top-level key whose elements hold the collection
+	field  string // key the collection takes within an element
+	path   string
+	method string
+}
+
+var nestedOperations = []nestedOperation{
+	{
+		parent: "environments", field: "variables",
+		path:   "/repos/{owner}/{repo}/environments/{environment_name}/variables",
+		method: "post",
+	},
 }
 
 const (
@@ -157,9 +213,10 @@ func loadSpec(ref string) (map[string]any, error) {
 
 // field mirrors schema.Field during generation.
 type field struct {
-	Type   string
-	Enum   []string
-	Fields map[string]field
+	Type     string
+	Enum     []string
+	Fields   map[string]field
+	Elements map[string]field
 }
 
 func generate(spec map[string]any, ref string) ([]byte, error) {
@@ -177,17 +234,52 @@ func generate(spec map[string]any, ref string) ([]byte, error) {
 	fmt.Fprintf(&b, "var generated = map[string]Resource{\n")
 
 	c := converter{spec: spec}
-	for _, op := range operations {
-		props, err := requestProperties(spec, op)
-		if err != nil {
-			return nil, err
-		}
-		fields := c.properties(props, nil)
+	for _, resource := range resourceNames() {
+		var (
+			fields = map[string]field{}
+			kind   string
+			from   []string
+		)
 
-		fmt.Fprintf(&b, "\t%q: {\n", op.resource)
-		fmt.Fprintf(&b, "\t\tName: %q,\n", op.resource)
-		fmt.Fprintf(&b, "\t\tKind: %s,\n", op.kind)
-		fmt.Fprintf(&b, "\t\t// from %s %s\n", strings.ToUpper(op.method), op.path)
+		// A resource whose state is spread over several endpoints is put back
+		// together here: the settings file describes the resource, not the
+		// requests it takes to write one.
+		for _, op := range operations {
+			if op.resource != resource {
+				continue
+			}
+			props, err := requestProperties(spec, op)
+			if err != nil {
+				return nil, err
+			}
+			for name, f := range c.properties(props, nil) {
+				if _, taken := fields[name]; taken {
+					return nil, fmt.Errorf("%s: %s is described by more than one operation", resource, name)
+				}
+				fields[name] = f
+			}
+			kind = op.kind
+			from = append(from, fmt.Sprintf("%s %s", strings.ToUpper(op.method), op.path))
+		}
+
+		for _, nested := range nestedOperations {
+			if nested.parent != resource {
+				continue
+			}
+			entry, err := requestProperties(spec, operation{path: nested.path, method: nested.method})
+			if err != nil {
+				return nil, err
+			}
+			fields[nested.field] = field{Type: "array", Elements: c.properties(entry, nil)}
+			from = append(from, fmt.Sprintf("%s %s", strings.ToUpper(nested.method), nested.path))
+		}
+
+		fmt.Fprintf(&b, "\t%q: {\n", resource)
+		fmt.Fprintf(&b, "\t\tName: %q,\n", resource)
+		fmt.Fprintf(&b, "\t\tKind: %s,\n", kind)
+		for _, source := range from {
+			fmt.Fprintf(&b, "\t\t// from %s\n", source)
+		}
 		fmt.Fprintf(&b, "\t\tFields: ")
 		writeFields(&b, fields, 2)
 		fmt.Fprintf(&b, ",\n")
@@ -206,17 +298,27 @@ func generate(spec map[string]any, ref string) ([]byte, error) {
 // requestProperties returns the properties of the operation's JSON request
 // body schema.
 func requestProperties(spec map[string]any, op operation) (map[string]any, error) {
-	node, err := dig(spec, "paths", op.path, op.method,
-		"requestBody", "content", "application/json", "schema", "properties")
+	where := fmt.Sprintf("%s %s", strings.ToUpper(op.method), op.path)
+
+	node, err := dig(spec, "paths", op.path, op.method, "requestBody", "content", "application/json", "schema")
 	if err != nil {
-		return nil, fmt.Errorf("%s %s: %w", strings.ToUpper(op.method), op.path, err)
+		return nil, fmt.Errorf("%s: %w", where, err)
 	}
-	props, ok := node.(map[string]any)
+	schema, ok := node.(map[string]any)
 	if !ok {
-		return nil, fmt.Errorf("%s %s: properties is not an object", strings.ToUpper(op.method), op.path)
+		return nil, fmt.Errorf("%s: schema is not an object", where)
 	}
-	if len(props) == 0 {
-		return nil, fmt.Errorf("%s %s: no properties found", strings.ToUpper(op.method), op.path)
+
+	// The body is sometimes a shared schema rather than one written out in
+	// place, so the ref is followed before its properties are read.
+	schema, _, ok = (converter{spec: spec}).resolve(schema, nil)
+	if !ok {
+		return nil, fmt.Errorf("%s: request body schema cannot be resolved", where)
+	}
+
+	props, ok := schema["properties"].(map[string]any)
+	if !ok || len(props) == 0 {
+		return nil, fmt.Errorf("%s: no properties found", where)
 	}
 	return props, nil
 }
@@ -367,8 +469,16 @@ func writeFields(b *strings.Builder, fields map[string]field, depth int) {
 			if len(parts) > 0 {
 				fmt.Fprintf(b, ", ")
 			}
+			parts = append(parts, "")
 			fmt.Fprintf(b, "Fields: ")
 			writeFields(b, f.Fields, depth+2)
+		}
+		if len(f.Elements) > 0 {
+			if len(parts) > 0 {
+				fmt.Fprintf(b, ", ")
+			}
+			fmt.Fprintf(b, "Elements: ")
+			writeFields(b, f.Elements, depth+2)
 		}
 		fmt.Fprintf(b, "},\n")
 	}

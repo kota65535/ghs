@@ -60,6 +60,19 @@ func (c Config) IsCollection(name string) bool {
 	return ok
 }
 
+// NestedCollections names the fields of the resource's elements that are
+// collections in their own right, such as the variables of an environment.
+//
+// These are compared entry by entry rather than as plain values, because the
+// API reaches them one entry at a time.
+func (c Config) NestedCollections(resource string) []string {
+	r, ok := schema.Lookup(resource)
+	if !ok {
+		return nil
+	}
+	return r.NestedCollections()
+}
+
 // Load reads and validates the settings file at path.
 func Load(path string, opts Options) (*Config, error) {
 	b, err := os.ReadFile(path)
@@ -158,6 +171,14 @@ func validateFields(path string, declared map[string]any, fields map[string]sche
 }
 
 func validateValue(path string, value any, field schema.Field, opts Options) []string {
+	// A field that is a collection of its own is declared as a sequence of
+	// named entries, and validated by the same rules as a top-level one --
+	// including that null is not one of the ways to write it.
+	if field.IsCollection() {
+		_, problems := elementsOf(path, value, field.Elements, opts)
+		return problems
+	}
+
 	if value == nil {
 		// Declaring null means "clear this field", and it is passed through
 		// as-is. Whether a given field accepts null is not checked here: the

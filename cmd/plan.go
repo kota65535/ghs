@@ -125,7 +125,7 @@ func computePlans(ctx context.Context, client resource.Client, repo resource.Rep
 
 	for _, name := range cfg.ResourceNames() {
 		if cfg.IsCollection(name) {
-			plan, err := computeCollectionPlan(ctx, client, repo, name, cfg.Collections[name])
+			plan, err := computeCollectionPlan(ctx, client, repo, name, cfg.Collections[name], cfg.NestedCollections(name))
 			if err != nil {
 				return nil, err
 			}
@@ -154,7 +154,7 @@ func computePlans(ctx context.Context, client resource.Client, repo resource.Rep
 	return plans, nil
 }
 
-func computeCollectionPlan(ctx context.Context, client resource.Client, repo resource.Repo, name string, elements map[string]map[string]any) (resourcePlan, error) {
+func computeCollectionPlan(ctx context.Context, client resource.Client, repo resource.Repo, name string, elements map[string]map[string]any, nested []string) (resourcePlan, error) {
 	collection, err := resource.LookupCollection(name)
 	if err != nil {
 		return resourcePlan{}, err
@@ -170,7 +170,7 @@ func computeCollectionPlan(ctx context.Context, client resource.Client, repo res
 		collection: collection,
 		elements:   elements,
 		current:    current,
-		changes:    diff.ComputeCollection(name, current, elements),
+		changes:    diff.ComputeCollection(name, current, elements, nested...),
 	}, nil
 }
 

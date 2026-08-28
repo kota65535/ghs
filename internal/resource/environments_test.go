@@ -138,6 +138,162 @@ func TestEnvironmentsCreateAndUpdateSendTheSameRequest(t *testing.T) {
 	}
 }
 
+func TestEnvironmentsFetchAllReadsTheVariablesOfEachEnvironment(t *testing.T) {
+	// The variables are listed separately from the environment but declared
+	// inside it, so they are put where the settings file expects them.
+	rec := newRecorder(t, map[string]string{
+		"GET /repos/kota65535/ghs/environments": `{"total_count": 1, "environments": [{"id": 1, "name": "production"}]}`,
+		"GET /repos/kota65535/ghs/environments/production/variables": `{"total_count": 1, "variables": [
+			{"name": "DEPLOY_REGION", "value": "ap-northeast-1", "created_at": "2026-01-01T00:00:00Z"}
+		]}`,
+	})
+	srv := rec.server()
+	defer srv.Close()
+
+	current, err := Environments{}.FetchAll(context.Background(), newTestClient(t, srv), Repo{Owner: "kota65535", Name: "ghs"})
+	if err != nil {
+		t.Fatalf("FetchAll: %v", err)
+	}
+
+	variables, ok := current["production"]["variables"].([]any)
+	if !ok {
+		t.Fatalf("variables = %+v, want a sequence", current["production"]["variables"])
+	}
+	if len(variables) != 1 {
+		t.Fatalf("got %d variables, want 1", len(variables))
+	}
+	if variables[0].(map[string]any)["value"] != "ap-northeast-1" {
+		t.Errorf("variables[0] = %+v, want the reported value", variables[0])
+	}
+}
+
+func TestEnvironmentsFetchAllReportsNoVariablesAsAnEmptySequence(t *testing.T) {
+	// An environment with no variables must not read as one whose variables
+	// are unknown: declaring none has to compare equal to having none.
+	rec := newRecorder(t, map[string]string{
+		"GET /repos/kota65535/ghs/environments":                   `{"total_count": 1, "environments": [{"id": 1, "name": "staging"}]}`,
+		"GET /repos/kota65535/ghs/environments/staging/variables": `{"total_count": 0, "variables": []}`,
+	})
+	srv := rec.server()
+	defer srv.Close()
+
+	current, err := Environments{}.FetchAll(context.Background(), newTestClient(t, srv), Repo{Owner: "kota65535", Name: "ghs"})
+	if err != nil {
+		t.Fatalf("FetchAll: %v", err)
+	}
+
+	variables, ok := current["staging"]["variables"].([]any)
+	if !ok || len(variables) != 0 {
+		t.Errorf("variables = %+v, want an empty sequence", current["staging"]["variables"])
+	}
+}
+
+func TestEnvironmentsSettleVariablesInOrder(t *testing.T) {
+	rec := newRecorder(t, nil)
+	srv := rec.server()
+	defer srv.Close()
+
+	current := map[string]any{
+		"name": "production",
+		"variables": []any{
+			map[string]any{"name": "KEEP", "value": "same"},
+			map[string]any{"name": "CHANGE", "value": "old"},
+			map[string]any{"name": "GONE", "value": "x"},
+		},
+	}
+	desired := map[string]any{
+		"name":       "production",
+		"wait_timer": float64(30),
+		"variables": []any{
+			map[string]any{"name": "KEEP", "value": "same"},
+			map[string]any{"name": "CHANGE", "value": "new"},
+			map[string]any{"name": "ADD", "value": "fresh"},
+		},
+	}
+
+	err := Environments{}.Update(context.Background(), newTestClient(t, srv), Repo{Owner: "kota65535", Name: "ghs"}, current, desired)
+	if err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+
+	// The environment is settled first -- a variable cannot go into one that
+	// does not exist -- and then its variables, created before deleted so that
+	// a failure part way leaves a spare rather than a gap.
+	want := []string{
+		"PUT /repos/kota65535/ghs/environments/production",
+		"POST /repos/kota65535/ghs/environments/production/variables",
+		"PATCH /repos/kota65535/ghs/environments/production/variables/CHANGE",
+		"DELETE /repos/kota65535/ghs/environments/production/variables/GONE",
+	}
+	if len(rec.requests) != len(want) {
+		t.Fatalf("made %d requests, want %d: %+v", len(rec.requests), len(want), rec.requests)
+	}
+	for i, w := range want {
+		got := rec.requests[i].method + " " + rec.requests[i].path
+		if got != w {
+			t.Errorf("request %d = %q, want %q", i, got, w)
+		}
+	}
+
+	// The variables are not a field of the environment's own request body.
+	if _, sent := rec.requests[0].body["variables"]; sent {
+		t.Errorf("body = %+v, want the variables left out", rec.requests[0].body)
+	}
+	if rec.requests[0].body["wait_timer"] != float64(30) {
+		t.Errorf("body = %+v, want the declared fields", rec.requests[0].body)
+	}
+}
+
+func TestEnvironmentsLeaveUndeclaredVariablesAlone(t *testing.T) {
+	// Not declaring the variables means not managing them, so nothing about
+	// them is sent -- least of all a delete.
+	rec := newRecorder(t, nil)
+	srv := rec.server()
+	defer srv.Close()
+
+	current := map[string]any{
+		"name":      "production",
+		"variables": []any{map[string]any{"name": "A", "value": "1"}},
+	}
+	desired := map[string]any{"name": "production", "wait_timer": float64(0)}
+
+	err := Environments{}.Update(context.Background(), newTestClient(t, srv), Repo{Owner: "kota65535", Name: "ghs"}, current, desired)
+	if err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+
+	got := rec.only()
+	if got.method != http.MethodPut || got.path != "/repos/kota65535/ghs/environments/production" {
+		t.Errorf("request = %s %s, want only the environment settled", got.method, got.path)
+	}
+}
+
+func TestEnvironmentsCreateSendsItsVariablesToo(t *testing.T) {
+	rec := newRecorder(t, nil)
+	srv := rec.server()
+	defer srv.Close()
+
+	desired := map[string]any{
+		"name":      "production",
+		"variables": []any{map[string]any{"name": "A", "value": "1"}},
+	}
+
+	err := Environments{}.Create(context.Background(), newTestClient(t, srv), Repo{Owner: "kota65535", Name: "ghs"}, desired)
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	if len(rec.requests) != 2 {
+		t.Fatalf("made %d requests, want the environment and its variable: %+v", len(rec.requests), rec.requests)
+	}
+	if rec.requests[1].path != "/repos/kota65535/ghs/environments/production/variables" {
+		t.Errorf("second request = %s, want the variable created", rec.requests[1].path)
+	}
+	if rec.requests[1].body["name"] != "A" {
+		t.Errorf("body = %+v, want the variable's name sent, since it is what the API keys on", rec.requests[1].body)
+	}
+}
+
 func TestEnvironmentsDelete(t *testing.T) {
 	rec := newRecorder(t, nil)
 	srv := rec.server()

@@ -237,6 +237,84 @@ variables:
 	}
 }
 
+func TestParseKeepsNestedCollectionEntries(t *testing.T) {
+	// The variables of an environment are reached through an API of their own,
+	// which does not stop them being a field of the environment.
+	cfg := mustParse(t, `
+environments:
+  - name: production
+    wait_timer: 30
+    variables:
+      - name: DEPLOY_REGION
+        value: ap-northeast-1
+`)
+
+	production := cfg.Collections["environments"]["production"]
+	variables, ok := production["variables"].([]any)
+	if !ok {
+		t.Fatalf("variables = %+v, want a sequence", production["variables"])
+	}
+	if len(variables) != 1 {
+		t.Fatalf("declared %d variables, want 1", len(variables))
+	}
+	if variables[0].(map[string]any)["value"] != "ap-northeast-1" {
+		t.Errorf("variables[0] = %+v, want its declared value", variables[0])
+	}
+
+	if nested := cfg.NestedCollections("environments"); len(nested) != 1 || nested[0] != "variables" {
+		t.Errorf("NestedCollections = %v, want [variables]", nested)
+	}
+	if nested := cfg.NestedCollections("variables"); len(nested) != 0 {
+		t.Errorf("NestedCollections(variables) = %v, want none", nested)
+	}
+}
+
+func TestParseValidatesNestedCollectionEntries(t *testing.T) {
+	for name, tc := range map[string]struct{ yaml, want string }{
+		"unknown field": {
+			yaml: "environments:\n  - name: production\n    variables:\n      - name: A\n        valeu: 1\n",
+			want: `environments["production"].variables["A"].valeu`,
+		},
+		"missing name": {
+			yaml: "environments:\n  - name: production\n    variables:\n      - value: 1\n",
+			want: "name is required",
+		},
+		"duplicate name": {
+			yaml: "environments:\n  - name: production\n    variables:\n      - name: A\n        value: 1\n      - name: A\n        value: 2\n",
+			want: "declared twice",
+		},
+		"not a sequence": {
+			yaml: "environments:\n  - name: production\n    variables:\n      A: 1\n",
+			want: "expected a sequence",
+		},
+		"null": {
+			yaml: "environments:\n  - name: production\n    variables:\n",
+			want: "[]",
+		},
+	} {
+		_, err := parse(t, tc.yaml, Options{})
+		if err == nil {
+			t.Errorf("%s: Parse succeeded, want an error", name)
+			continue
+		}
+		if !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%s: err = %v, want it to mention %q", name, err, tc.want)
+		}
+	}
+}
+
+func TestParseAcceptsAnEmptyNestedCollection(t *testing.T) {
+	// As with a top-level collection, declaring no entries asks for the ones
+	// that exist to go.
+	cfg := mustParse(t, "environments:\n  - name: production\n    variables: []\n")
+
+	production := cfg.Collections["environments"]["production"]
+	variables, ok := production["variables"].([]any)
+	if !ok || len(variables) != 0 {
+		t.Errorf("variables = %+v, want an empty sequence kept", production["variables"])
+	}
+}
+
 func TestParseRejectsASequenceForASingleObjectResource(t *testing.T) {
 	_, err := parse(t, "repository:\n  - has_issues: true\n", Options{})
 	if err == nil || !strings.Contains(err.Error(), "mapping") {

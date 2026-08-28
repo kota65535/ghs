@@ -47,6 +47,7 @@ type Resource interface {
 
 var registry = map[string]Resource{
 	"repository": Repository{},
+	"actions":    Actions{},
 }
 
 var collections = map[string]Collection{

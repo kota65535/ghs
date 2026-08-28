@@ -67,6 +67,26 @@ ghs: .github/settings.yml: repository.has_discusions: not a writable field of th
 repository.squash_merge_commit_title: "TITLE" is not one of COMMIT_OR_PR_TITLE, PR_TITLE
 ```
 
+## Actions settings
+
+How Actions runs in the repository — including what a workflow's token is allowed to do:
+
+```yaml
+actions:
+  enabled: true
+  allowed_actions: all              # all, local_only or selected
+  sha_pinning_required: false
+  default_workflow_permissions: read   # the GITHUB_TOKEN a workflow gets
+  can_approve_pull_request_reviews: false
+  approval_policy: first_time_contributors   # for fork pull requests
+```
+
+GitHub spreads these across four endpoints; you declare them as one thing and ghs works out which requests that takes.
+
+`default_workflow_permissions` is the one worth pinning. It decides whether every workflow in the repository runs with a token that can write to it, and it is a single click away in the web interface.
+
+Some of these only exist under certain conditions — the allowed actions are listed only while `allowed_actions` is `selected`. Declare one where it does not apply and the plan shows it as a change against nothing, rather than failing the run.
+
 ## Rulesets, variables and environments
 
 These are sets of named things rather than one object, so they are written as a list. Each entry is the body that creates one, with `name` identifying it:
@@ -130,6 +150,19 @@ Leave the key out and ghs does not touch those settings at all — it does not e
 The set is what belongs to the repository itself. Rulesets an organization applies to it, and variables defined at the organization level, are not part of it and are never deleted — ghs cannot write them either way. Anything ghs *can* write is in scope, though, including entries some other tool created, so do not manage the same set from two places.
 
 Within an entry the usual rule holds: fields you leave out are not managed.
+
+An environment's variables go under the environment that owns them:
+
+```yaml
+environments:
+  - name: production
+    wait_timer: 30
+    variables:
+      - name: DEPLOY_REGION
+        value: ap-northeast-1
+```
+
+GitHub reaches these through an endpoint of their own, one variable at a time, but that is a detail of how they are written rather than of what they are: they are a field of the environment, so that is where you declare them. The same rules apply as to any list of entries — declaring `variables` manages the whole set, and leaving the key out means ghs does not touch them.
 
 Secrets are not supported, and are not planned. Their values cannot be read back, so a plan could not tell you whether one matches what you declared — and reporting "no changes" without knowing that would be a lie. Use `gh secret set` or a secrets manager.
 
