@@ -3,102 +3,56 @@ package cmd
 import (
 	"bytes"
 	"context"
-	"encoding/json"
-	"fmt"
-	"io"
 	"strings"
 	"testing"
 )
 
-// collectionClient answers the list endpoint with canned variables and records
-// every write, so that the order the operations go out in can be asserted.
-type collectionClient struct {
-	variables []map[string]any
-	calls     []string
-	listings  []string
-	failOn    string
-}
-
-func (c *collectionClient) DoWithContext(_ context.Context, method, path string, body io.Reader, response any) error {
-	call := method + " " + path
-	if strings.HasPrefix(path, "repos/kota65535/ghs/actions/variables?") {
-		// Reads are recorded apart from writes: whether a collection was
-		// looked at is its own question from what was done about it.
-		c.listings = append(c.listings, call)
-		return json.Unmarshal(c.listing(), response)
-	}
-
-	if c.failOn != "" && strings.Contains(call, c.failOn) {
-		return fmt.Errorf("api refused %s", call)
-	}
-
-	var sent map[string]any
-	if body != nil {
-		if err := json.NewDecoder(body).Decode(&sent); err != nil {
-			return err
-		}
-	}
-	c.calls = append(c.calls, fmt.Sprintf("%s %v", call, sent[elementNameForTest]))
-	return nil
-}
-
-// elementNameForTest is the field the recorded calls are labelled by.
-const elementNameForTest = "name"
-
-func (c *collectionClient) listing() []byte {
-	page := map[string]any{"total_count": len(c.variables), "variables": c.variables}
-	b, _ := json.Marshal(page)
-	return b
-}
-
-func TestPlanAndApplyOverACollection(t *testing.T) {
-	client := &collectionClient{variables: []map[string]any{
-		{"name": "KEEP", "value": "same"},
-		{"name": "CHANGE", "value": "old"},
-		{"name": "GONE", "value": "x"},
+func TestApplyACollection(t *testing.T) {
+	client := &fakeClient{reads: map[string]string{
+		"repos/kota65535/ghs/actions/variables": `{"variables": [
+			{"name": "KEEP", "value": "same"},
+			{"name": "CHANGE", "value": "old"},
+			{"name": "GONE", "value": "x"}
+		]}`,
 	}}
-	cfg := mustConfig(t, `
-variables:
-  - name: KEEP
-    value: same
-  - name: CHANGE
-    value: new
-  - name: ADD
-    value: fresh
+
+	p := planFor(t, client, `
+actions:
+  variables:
+    - name: KEEP
+      value: same
+    - name: CHANGE
+      value: new
+    - name: ADD
+      value: fresh
 `)
 
-	resources, err := computePlans(context.Background(), client, testRepo, cfg)
-	if err != nil {
-		t.Fatalf("computePlans: %v", err)
-	}
-	if len(resources) != 1 {
-		t.Fatalf("got %d resource plans, want 1", len(resources))
-	}
-
 	var out bytes.Buffer
-	if err := apply(context.Background(), &out, plans{repo: testRepo, client: client, resources: resources}); err != nil {
+	if err := apply(context.Background(), &out, p); err != nil {
 		t.Fatalf("apply: %v", err)
 	}
 
 	// Create first and delete last: a failure part way through then leaves a
 	// spare element rather than a missing one.
 	want := []string{
-		"POST repos/kota65535/ghs/actions/variables ADD",
-		"PATCH repos/kota65535/ghs/actions/variables/CHANGE CHANGE",
-		"DELETE repos/kota65535/ghs/actions/variables/GONE <nil>",
+		"POST repos/kota65535/ghs/actions/variables",
+		"PATCH repos/kota65535/ghs/actions/variables/CHANGE",
+		"DELETE repos/kota65535/ghs/actions/variables/GONE",
 	}
-	if len(client.calls) != len(want) {
-		t.Fatalf("made %d calls, want %d: %v", len(client.calls), len(want), client.calls)
+	got := client.calls()
+	if len(got) != len(want) {
+		t.Fatalf("made %v, want %v", got, want)
 	}
 	for i := range want {
-		if client.calls[i] != want[i] {
-			t.Errorf("call %d = %q, want %q", i, client.calls[i], want[i])
+		if got[i] != want[i] {
+			t.Errorf("call %d = %q, want %q", i, got[i], want[i])
 		}
 	}
 
 	output := out.String()
 	for _, want := range []string{
-		"~ variables: [",
+		"~ actions:",
+		"    ~ variables: [",
 		`        + name:  "ADD"`,
 		`          name:  "CHANGE"`,
 		`        ~ value: "old" -> "new"`,
@@ -116,51 +70,111 @@ variables:
 	}
 }
 
-func TestApplyStopsAtTheFirstCollectionFailure(t *testing.T) {
-	client := &collectionClient{
-		variables: []map[string]any{{"name": "GONE", "value": "x"}},
-		failOn:    "POST",
-	}
-	cfg := mustConfig(t, "variables:\n  - name: ADD\n    value: fresh\n")
-
-	resources, err := computePlans(context.Background(), client, testRepo, cfg)
-	if err != nil {
-		t.Fatalf("computePlans: %v", err)
-	}
-
-	var out bytes.Buffer
-	err = apply(context.Background(), &out, plans{repo: testRepo, client: client, resources: resources})
-	if err == nil {
-		t.Fatal("apply succeeded, want the API failure reported")
-	}
-	// The delete must not have gone out: a failed create leaves the settings
-	// further from the declaration, not nearer to it.
-	if len(client.calls) != 0 {
-		t.Errorf("made %v, want nothing after the failure", client.calls)
-	}
-}
-
-func TestEmptyCollectionDeletesEverything(t *testing.T) {
-	client := &collectionClient{variables: []map[string]any{
-		{"name": "A", "value": "1"},
-		{"name": "B", "value": "2"},
+func TestApplyACollectionUnderAnElement(t *testing.T) {
+	// The variables of an environment are reached through that environment's
+	// own path, which the walk builds as it passes through the element.
+	client := &fakeClient{reads: map[string]string{
+		"repos/kota65535/ghs/environments": `{"environments": [{"id": 1, "name": "production"}]}`,
+		"repos/kota65535/ghs/environments/production/variables": `{"variables": [
+			{"name": "REGION", "value": "ap-northeast-1"},
+			{"name": "GONE", "value": "x"}
+		]}`,
 	}}
-	cfg := mustConfig(t, "variables: []\n")
 
-	resources, err := computePlans(context.Background(), client, testRepo, cfg)
-	if err != nil {
-		t.Fatalf("computePlans: %v", err)
-	}
+	p := planFor(t, client, `
+environments:
+  - name: production
+    wait_timer: 0
+    variables:
+      - name: REGION
+        value: us-east-1
+      - name: ADD
+        value: fresh
+`)
 
 	var out bytes.Buffer
-	if err := apply(context.Background(), &out, plans{repo: testRepo, client: client, resources: resources}); err != nil {
+	if err := apply(context.Background(), &out, p); err != nil {
 		t.Fatalf("apply: %v", err)
 	}
 
-	if len(client.calls) != 2 {
-		t.Fatalf("made %d calls, want both elements deleted: %v", len(client.calls), client.calls)
+	// The environment itself does not differ, so only its variables are
+	// written -- each under the environment's path.
+	want := []string{
+		"POST repos/kota65535/ghs/environments/production/variables",
+		"PATCH repos/kota65535/ghs/environments/production/variables/REGION",
+		"DELETE repos/kota65535/ghs/environments/production/variables/GONE",
 	}
-	for _, call := range client.calls {
+	got := client.calls()
+	if len(got) != len(want) {
+		t.Fatalf("made %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("call %d = %q, want %q", i, got[i], want[i])
+		}
+	}
+
+	// Changing what an environment owns changes that environment: the
+	// variables are not objects in their own right.
+	if summary := p.plan.Summarize(); summary.Changed != 1 || summary.Created != 0 || summary.Deleted != 0 {
+		t.Errorf("summary = %+v, want one object changed", summary)
+	}
+}
+
+func TestApplyCreatesAnElementBeforeWhatItHolds(t *testing.T) {
+	// Nothing can be put into an environment that is not there yet.
+	client := &fakeClient{reads: map[string]string{
+		"repos/kota65535/ghs/environments": `{"environments": []}`,
+	}}
+
+	p := planFor(t, client, `
+environments:
+  - name: production
+    wait_timer: 0
+    variables:
+      - name: REGION
+        value: us-east-1
+`)
+
+	var out bytes.Buffer
+	if err := apply(context.Background(), &out, p); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+
+	want := []string{
+		"PUT repos/kota65535/ghs/environments/production",
+		"POST repos/kota65535/ghs/environments/production/variables",
+	}
+	got := client.calls()
+	if len(got) != len(want) {
+		t.Fatalf("made %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("call %d = %q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
+func TestDeclaringAnEmptyCollectionDeletesEverything(t *testing.T) {
+	client := &fakeClient{reads: map[string]string{
+		"repos/kota65535/ghs/actions/variables": `{"variables": [
+			{"name": "A", "value": "1"},
+			{"name": "B", "value": "2"}
+		]}`,
+	}}
+
+	p := planFor(t, client, "actions:\n  variables: []\n")
+
+	var out bytes.Buffer
+	if err := apply(context.Background(), &out, p); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+
+	if len(client.writes) != 2 {
+		t.Fatalf("made %v, want both elements deleted", client.calls())
+	}
+	for _, call := range client.calls() {
 		if !strings.HasPrefix(call, "DELETE ") {
 			t.Errorf("call = %q, want a delete", call)
 		}
@@ -173,41 +187,37 @@ func TestEmptyCollectionDeletesEverything(t *testing.T) {
 func TestAnUndeclaredCollectionIsNotEvenLookedAt(t *testing.T) {
 	// Declaring a collection puts its whole set under management, so leaving
 	// the key out has to mean more than "no changes": ghs must not ask what is
-	// there, because nothing it learned could lead to an action it is allowed
-	// to take.
-	client := &collectionClient{variables: []map[string]any{{"name": "A", "value": "1"}}}
-	cfg := mustConfig(t, "repository:\n  has_issues: true\n")
+	// there, because nothing it learned could lead to an action it may take.
+	client := &fakeClient{reads: map[string]string{
+		"repos/kota65535/ghs":                   `{"has_issues": false}`,
+		"repos/kota65535/ghs/actions/variables": `{"variables": [{"name": "A", "value": "1"}]}`,
+	}}
 
-	resources, err := computePlans(context.Background(), client, testRepo, cfg)
-	if err != nil {
-		t.Fatalf("computePlans: %v", err)
-	}
+	p := planFor(t, client, "has_issues: true\n")
 
-	for _, r := range resources {
-		if r.collection != nil {
-			t.Errorf("planned collection %q, want only the declared resource", r.name)
-		}
+	if len(p.plan.Children) != 0 {
+		t.Errorf("planned children %+v, want only the repository", p.plan.Children)
 	}
-	if len(client.listings) != 0 {
-		t.Errorf("listed %v, want no collection read at all", client.listings)
+	if summary := p.plan.Summarize(); summary.Deleted != 0 {
+		t.Errorf("summary = %+v, want nothing deleted", summary)
 	}
 }
 
-func TestElementOperationsCountsAnElementOnce(t *testing.T) {
-	// Several fields of one element differ, and it is still a single update.
-	client := &collectionClient{variables: []map[string]any{{"name": "A", "value": "old"}}}
-	cfg := mustConfig(t, "variables:\n  - name: A\n    value: new\n")
-
-	resources, err := computePlans(context.Background(), client, testRepo, cfg)
-	if err != nil {
-		t.Fatalf("computePlans: %v", err)
+func TestApplyStopsAtTheFirstFailure(t *testing.T) {
+	client := &fakeClient{
+		reads:  map[string]string{"repos/kota65535/ghs/actions/variables": `{"variables": [{"name": "GONE", "value": "x"}]}`},
+		failOn: "actions/variables",
 	}
 
-	created, updated, deleted := elementOperations(resources[0].changes)
-	if len(created) != 0 || len(deleted) != 0 {
-		t.Errorf("created/deleted = %v/%v, want neither", created, deleted)
+	p := planFor(t, client, "actions:\n  variables:\n    - name: ADD\n      value: fresh\n")
+
+	var out bytes.Buffer
+	if err := apply(context.Background(), &out, p); err == nil {
+		t.Fatal("apply succeeded, want the API failure reported")
 	}
-	if len(updated) != 1 || updated[0] != "A" {
-		t.Errorf("updated = %v, want [A]", updated)
+	// The delete must not have gone out: a failed create leaves the settings
+	// further from the declaration, not nearer to it.
+	if len(client.writes) != 0 {
+		t.Errorf("made %v, want nothing after the failure", client.calls())
 	}
 }

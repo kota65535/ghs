@@ -4,32 +4,44 @@ GitHub リポジトリ設定を宣言的に管理する小さな CLI ツール�
 
 ## 基本方針
 
-**settings.yml は API の語彙でリソースの状態を書いたもの。** 独自の抽象を挟まない。トップレベルキーが API リソースに対応し、その下のフィールド名・値は GitHub REST API と完全に一致させる。ドキュメントは GitHub の API リファレンスがそのまま使える。
+**settings.yml は API のパス構造をそのまま写した木。** 独自の抽象を挟まない。ファイルのルートがリポジトリ（`PATCH /repos/{owner}/{repo}`）で、そのリクエストのフィールドがトップレベルに直接並ぶ。より長いパスで届く設定は、パスセグメントの名前をキーにしてその下に書く。フィールド名・値は GitHub REST API と完全に一致させる。ドキュメントは GitHub の API リファレンスがそのまま使える。
 
 ```yaml
 # .github/settings.yml
-repository:
-  has_issues: true
-  has_projects: true
-  has_wiki: true
-  has_discussions: false
-  allow_squash_merge: true
-  allow_merge_commit: true
-  allow_rebase_merge: true
-  allow_auto_merge: true
-  allow_update_branch: true
-  delete_branch_on_merge: true
-  allow_forking: true
-  squash_merge_commit_title: PR_TITLE
-  squash_merge_commit_message: PR_BODY
-  merge_commit_title: MERGE_MESSAGE
-  merge_commit_message: PR_TITLE
-  web_commit_signoff_required: false
+has_issues: true
+has_wiki: false
+allow_squash_merge: true
+allow_merge_commit: false
+delete_branch_on_merge: true
+squash_merge_commit_title: PR_TITLE
+
+actions:                                # /repos/{owner}/{repo}/actions
+  permissions:                          # .../actions/permissions
+    enabled: true
+    allowed_actions: all
+    workflow:                           # .../actions/permissions/workflow
+      default_workflow_permissions: read
+  variables:                            # .../actions/variables
+    - name: DEPLOY_REGION
+      value: ap-northeast-1
+
+rulesets:                               # .../rulesets
+  - name: protect-main
+    enforcement: active
+
+environments:                           # .../environments/{name}
+  - name: production
+    wait_timer: 30
+    variables:                          # .../environments/{name}/variables
+      - name: DEPLOY_REGION
+        value: ap-northeast-1
 ```
 
-`repository` の中身は `PATCH /repos/{owner}/{repo}` のボディと 1:1 になっている。ただしこれは、リソースの状態が 1 回のリクエストで書き切れる場合にそう見えるというだけで、リクエストボディに合わせているわけではない。複数の API 呼び出しで到達する状態もあり、そのときの書き方は「リストを持つリソースと API の操作単位」の節で扱う。
+**設定がどこに書かれるかは、それを変える API のパスで決まる。** 逆に、書きたい設定の置き場所は API リファレンスのパスを読めば分かる。覚えるべき対応表がない。
 
-`version:` のようなフォーマット版のキーは置かない。0.x の段階で互換性を約束しておらず、今は何も区別していない。必要になった時点で「キーが無ければ現行の解釈」として後から足せるので、先回りして書かせる理由がない。
+この形に至った経緯は「ファイルの形はパスに従う」の節で扱う。要点は、リソースがフィールドと子リソースの両方を持つことを environment で既に受け入れているので、リポジトリを例外にする理由がなかった、というところにある。
+
+`version:` のようなフォーマット版のキーは置かない。0.x の段階で互換性を約束しておらず、今は何も区別していない。必要になった時点で「キーが無ければ現行の解釈」として後から足せるので、先回りして書かせる理由がない。ルートがリポジトリそのものなので、メタキーを置くには予約語を 1 つ切ることになる。
 
 ## 設計の核: map ベースで持つ
 
@@ -189,34 +201,55 @@ ghs/
   main.go
   cmd/
     root.go
-    plan.go
-    apply.go
+    plan.go       設定ファイルの木を辿って差分を組む
+    apply.go      宣言と差分を一緒に辿って書き込む
   internal/
-    config/       settings.yml のロードと検証
-    schema/       生成されたフィールド定義（許可フィールド・型・enum）
+    config/       settings.yml を木に沿って読み、検証する
+    schema/       設定ファイルの木（パス・メソッド・フィールド定義）
+      schema.go     木の型
+      nodes_gen.go  生成された木
+      extra.go      spec の欠落の補完と、木への合成
     resource/
-      resource.go     単一オブジェクトの interface とレジストリ
-      repository.go
-      collection.go   コレクションの interface と共通処理
-      variables.go
-      rulesets.go
-      environments.go
-    diff/         正規化・差分計算・表示
-  gen/            OpenAPI spec からのフィールド定義生成（go generate）
+      resource.go     Object / Collection interface と Path
+      generic.go      パスとメソッドから駆動する汎用実装
+      rulesets.go     サーバ発行 id でアドレスする
+      environments.go 報告形を宣言形に戻す
+    diff/
+      diff.go       正規化とフィールド比較
+      collection.go 要素の突き合わせ
+      plan.go       木の形をした差分
+      render.go     表示
+  gen/            OpenAPI spec から木を生成（go generate）
 ```
 
-リソースは interface で抽象化し、registry に登録する:
+読み書きは 2 つの interface に分かれる。
 
 ```go
-type Resource interface {
-    Name() string // "repository"
-    Fetch(ctx context.Context, r Repo) (map[string]any, error)
-    Apply(ctx context.Context, r Repo, desired map[string]any) error
-    Schema() FieldSchema // 生成コード由来（許可フィールド・型・enum・nullable）
+// Object は 1 ノードのフィールドを読み書きする。
+type Object interface {
+    Fetch(ctx context.Context, c Client, node schema.Node, path Path) (map[string]any, error)
+    Apply(ctx context.Context, c Client, node schema.Node, path Path, desired map[string]any) error
+}
+
+// Collection は名前付き要素の集合を読み書きする。要素は現れたり消えたりするので
+// create と delete が要る。
+type Collection interface {
+    FetchAll(ctx context.Context, c Client, node schema.Node, path Path) (map[string]map[string]any, error)
+    Create(ctx context.Context, c Client, node schema.Node, path Path, desired map[string]any) error
+    Update(ctx context.Context, c Client, node schema.Node, path Path, current, desired map[string]any) error
+    Delete(ctx context.Context, c Client, node schema.Node, path Path, current map[string]any) error
+
+    // ElementPath は 1 要素のパス。その下のノードはここから伸びる。
+    ElementPath(path Path, element map[string]any) (Path, error)
 }
 ```
 
-注意: `rulesets` や `variables` は「名前をキーにしたコレクション」で、単一オブジェクトの `repository` とは形が違う（作成・更新・削除の 3 操作が要る）。この interface には収めず、別の interface を切る（Phase 2 の節を参照）。
+**大半のノードは何も書かなくてよい。** パスとメソッドは schema が持っているので、`GenericObject` と `GenericCollection` で読み書きできる。手で書くのは GitHub が自分のパターンから外れる箇所だけで、今は 2 つある。
+
+- `Rulesets`: 名前で突き合わせるがアドレスはサーバ発行の `id`。一覧が `rules` を含む保証がないので要素ごとに GET する
+- `Environments`: 報告形（`protection_rules` 配列）が宣言形（`wait_timer` ほか）と違うので変形する
+
+`Path` は木を下りながら組み立てる。これがコレクションの要素名をパスに入れる仕組みで、`environments/{name}/variables` の `{name}` は辿っている要素から来る。
 
 ## テスト
 
@@ -250,14 +283,15 @@ type Resource interface {
 
 ### YAML の形: name を持つ要素の配列
 
-コレクションは、作成 API のリクエストボディをそのまま並べた配列として書く。
+コレクションは、作成 API のリクエストボディをそのまま並べた配列として書く。書く場所は、そのコレクションの API パスに対応するキーの下になる。
 
 ```yaml
-variables:
-  - name: DEPLOY_REGION
-    value: ap-northeast-1
+actions:
+  variables:                            # .../actions/variables
+    - name: DEPLOY_REGION
+      value: ap-northeast-1
 
-rulesets:
+rulesets:                               # .../rulesets
   - name: protect-main
     target: branch
     enforcement: active
@@ -270,17 +304,17 @@ rulesets:
         parameters:
           required_approving_review_count: 1
 
-environments:
+environments:                           # .../environments/{name}
   - name: production
     wait_timer: 30
 ```
 
-`variables` と `rulesets` の要素は作成 API のボディと 1:1 で、「リクエストボディそのもの」の原則がそのまま成り立つ。`environments` だけは name がボディではなくパス（`PUT .../environments/{name}`）に入るため、要素に `name` を追加で要求する。名前をキーにした map で書く形（`environments:` 側に寄せる形）も検討したが、その場合は `variables` / `rulesets` の 2 リソースでボディから name を抜く変形が要る。逸脱が 1 リソースの「フィールド追加」で済む配列形を採る。
+要素は作成 API のボディと 1:1。ただし `environments` は name がボディではなくパスに入るため、要素の `name` はフィールド定義の合成時に補う。名前をキーにした map で書く形も検討したが、その場合は他のコレクションでボディから name を抜く変形が要る。逸脱が 1 箇所の「フィールド追加」で済む配列形を採る。
 
 - `name` は全要素で必須。欠落・重複はロード時エラー
 - 配列の並び順に意味はない。要素は name で突き合わせる
 - `rulesets: []`（空配列）は「ルールセットを 1 つも持たない」という宣言。既存の全要素が削除対象になる
-- `rulesets:`（値省略 = null）はエラーにする。単一オブジェクト側では null を「クリア」として通しているが、コレクションでは書きかけ 1 行が全削除の宣言になってしまう。空配列という明示的な書き方があるので、null に意味を与えない
+- `rulesets:`（値省略 = null）はエラーにする。フィールドでは null を「クリア」として通しているが、コレクションでは書きかけ 1 行が全削除の宣言になってしまう。空配列という明示的な書き方があるので、null に意味を与えない
 
 ### キーを書いたら集合全体を管理する
 
@@ -304,110 +338,17 @@ YAML から消えた要素は**削除する**。トップレベルキーの宣�
 
 一方、ghs 以外の手段（Terraform、手作業、他のツール）で作られた要素は、書き込める範囲にある以上、削除対象になる。同じリソースを二重に管理しないことは利用側の責任になる。
 
-### interface 分離
+### 報告形を宣言形に戻す
 
-単一オブジェクト用の `Resource` とは別に、コレクション用の interface を切る。
+コレクションの読み出しは「作成リクエストの語彙」に揃えて返す。`environments` の GET レスポンスは `wait_timer` / `reviewers` / `prevent_self_review` を `protection_rules` 配列の中に畳み込んでおり、リクエストボディと形が一致しない（検証の節で触れた非対称と同じもの）。レビュアーも、レスポンスは `{type, reviewer: {id, login, ...}}` だがリクエストは `{type, id}` で、ここでも形が違う。この変形はリソース実装の中に閉じ込め、diff 層には「同じ語彙の map 同士の比較」だけをさせる。
 
-```go
-type Collection interface {
-    // Name is the top-level key in settings.yml.
-    Name() string
-
-    // FetchAll returns current elements shaped like the create request body,
-    // keyed by element name. Read-only fields the API reports (id etc.) are
-    // kept so Update and Delete can use them.
-    FetchAll(ctx context.Context, c Client, repo Repo) (map[string]map[string]any, error)
-
-    Create(ctx context.Context, c Client, repo Repo, desired map[string]any) error
-
-    // Update receives current alongside desired because some collections
-    // address elements by a server-issued id (rulesets) rather than by name.
-    Update(ctx context.Context, c Client, repo Repo, current, desired map[string]any) error
-
-    Delete(ctx context.Context, c Client, repo Repo, current map[string]any) error
-}
-```
-
-FetchAll が「作成リクエストの語彙」に揃えて返すのがポイント。`environments` の GET レスポンスは `wait_timer` / `reviewers` / `prevent_self_review` を `protection_rules` 配列の中に畳み込んでおり、リクエストボディと形が一致しない（検証の節で触れた非対称と同じもの）。レビュアーも、レスポンスは `{type, reviewer: {id, login, ...}}` だがリクエストは `{type, id}` で、ここでも形が違う。この変形はリソース実装の中に閉じ込め、diff 層には Phase 1 と同じ「同じ語彙の map 同士の比較」だけをさせる。
-
-変形では、**オフの保護ルールをオフを意味する値として補う**必要がある。`protection_rules` は有効なルールしか含まないため、待機時間を設定していない environment のレスポンスには `wait_timer` が現れない。補わずに変換すると、`wait_timer: 0`（＝待機なし）という宣言が `(missing) => 0` の差分として現れ、apply しても消えない。`prevent_self_review` は `false`、`reviewers` は空配列が対応する既定値になる。
+変形では、**オフの保護ルールをオフを意味する値として補う**必要がある。`protection_rules` は有効なルールしか含まないため、待機時間を設定していない environment のレスポンスには `wait_timer` が現れない。補わずに変換すると、`wait_timer: 0`（＝待機なし）という宣言が「現在値なし」との差分として現れ、apply しても消えない。`prevent_self_review` は `false`、`reviewers` は空配列が対応する既定値になる。
 
 「レスポンスをリクエストの語彙に戻す」とは、フィールド名を移し替えるだけでなく、**ルールの有無を値の有無ではなく値そのものとして表現し直す**ことでもある。
 
 `environments` は作成と更新が同一リクエスト（`PUT .../environments/{name}`）なので、Create と Update の実装は同じものになる。interface 上は分けたままにする。呼び出し側が「作成なのか更新なのか」を知っているのは plan の表示と apply の順序制御に必要で、その区別を API の都合で潰す理由がない。
 
-一覧はページネーションを回す。go-gh の REST クライアントはレスポンスヘッダを返さないため Link ヘッダが読めないので、「1 ページの件数が上限未満なら最終ページ」で判定する。`variables` の一覧は per_page 上限が 30、他は 100。API が最終ページを返し続けない事故に備えて 100 ページで打ち切る。
-
-差分は要素単位の操作として表す:
-
-- 宣言にあって現状に無い name → **create**
-- 両方にある name → 宣言キーだけを再帰比較し、差分があれば **update**（送るのは Phase 1 と同じく宣言値全体）
-- 現状にあって宣言に無い name → **delete**
-
-apply の実行順は create → update → delete で固定する。途中で失敗したとき、残るのが「余分な要素」（未削除）であって「欠けた要素」にならないようにする。
-
-出力:
-
-コレクションは**シーケンスとして**出す。settings.yml で配列として書くものを、plan だけ `rulesets["protect-main"]` のようなキー付きの形で見せると、入力と出力で構造が食い違う。名前をキーに突き合わせているのは内部の話であって、読み手が知っていることではない。
-
-```
-~ rulesets: [
-    - {
-        - enforcement: "active"
-        - id:          7
-        - name:        "legacy"
-      },
-    ~ {
-          name:        "protect-main"
-        ~ enforcement: "evaluate" -> "active"
-      },
-    + {
-        + conditions: {
-            + ref_name: {
-                + include: [
-                    + "~DEFAULT_BRANCH",
-                  ]
-              }
-          }
-        + enforcement: "active"
-        + name:        "release-protect"
-        + target:      "branch"
-      },
-  ]
-
-Plan: 1 to create, 1 to change, 1 to delete.
-```
-
-要素そのものに記号が付く。リソースの記号が常に `~` なのは、リポジトリは存在していて、生まれたり消えたりするのは中の要素だからである。
-
-create と delete では要素のフィールドを並べ、入れ子の map と配列は展開する。何が作られ何が消えるのかは中身を見なければ判断できず、`rules` のような入れ子を 1 行の JSON で出しても読めない。delete では現在値をそのまま出すので `id` や `created_at` のような読み取り専用フィールドも並ぶ。冗長ではあるが、実際に消えるものの実態がそれである以上、省く理由がない。
-
-update では、変更されたフィールドの前に `name` を**記号なしで**置く。シーケンスの要素には見出しがないので、これがないとどの要素の話か分からない。記号を付けないのは、`name` が変更の一部ではなく要素を指すための文脈だからで、Terraform が `id` のような不変のフィールドをそのまま並べるのと同じ扱いになる。
-
-Terraform はリストの要素を追跡しないので、中身が変わった要素は削除と追加のペアになる。ghs は `name` で追跡するため要素単位の update があり、そこだけは Terraform に対応する形がない。
-
-入れ子は `{ }` と `[ ]` で囲む。YAML のブロックスタイル（インデントのみ、配列は `- `）に寄せる案もあるが、配列マーカーの `-` が削除を示す `-` と衝突して誤読を招く。flow style は YAML として正しい記法なので、これで表記の一貫性は保たれる。
-
-update のフィールドは `rules[0].parameters.x: 1 -> 2` のような平坦なパスで出す。木として展開する手もあるが、差分のパスから木を組み直す必要があるうえ、深い入れ子の中で変更箇所を探すことになる。「どこが変わったか」を読む用途では平坦なパスのほうが速い。create と delete で展開するのは、そこでは値そのものが読む対象だからで、目的が違う。
-
-片側にしか値が無い差分（配列の伸縮）は、`->` の片側が空になるので、記号を `+` / `-` にして値だけを出す。値がオブジェクトや配列なら展開する。ルールが 1 つ消えるだけで数十行分の JSON が 1 行に潰れるのを避けるため。
-
-```
-        ~ enforcement:   "active" -> "evaluate"
-        ~ rules[1].type: "non_fast_forward" -> "required_linear_history"
-        - rules[2]: {
-            - parameters: {
-                - required_approving_review_count: 0
-              }
-            - type: "pull_request"
-          }
-```
-
-削除される要素には、宣言していない読み取り専用フィールドや既定値も並ぶ。要素ごと消える以上それが実態なので、ここでは省かない。共通位置の比較で無視されるのとは事情が違う。
-
-なお差分の `Path`（`rulesets["protect-main"].enforcement`）はキー付きのままにする。`--format json` と検証エラーが使うもので、機械が読む識別子としては、順序に左右されず削除された要素にも与えられるキー表記のほうが扱いやすい。テキスト出力だけを人が読む形に寄せる。
-
-markdown の表は `Action | Path | Current | Desired` の 4 列で、create と delete の行には要素全体が入る。
+一覧はページネーションを回す。go-gh の REST クライアントはレスポンスヘッダを返さないため Link ヘッダが読めないので、「1 ページの件数が上限未満なら最終ページ」で判定する。per_page は読み出す全エンドポイントの最小値（variables の 30）に揃える。上限より小さいページサイズは時折リクエストが 1 回増えるだけだが、上限より大きいとエラーになる。API が最終ページを返し続けない事故に備えて 100 ページで打ち切る。
 
 ### 配列の比較: index 対で再帰する
 
@@ -461,116 +402,66 @@ secrets は Phase 2 でも対象外とし、当面サポートしない。宣言
 
 **rulesets 一覧が `rules` / `conditions` を含むか。** 含むと分かれば要素ごとの GET を省ける。今は含まない前提で実装している。
 
-## リストを持つリソースと API の操作単位
+## ファイルの形はパスに従う
 
-リソースがフィールドとしてリストを持つとき、API の作り方は 2 通りある。
+設定ファイルの形は、当初「トップレベルキー = 管理対象のリソース」だった。`repository:` の下に `PATCH /repos` のボディを書き、`rulesets:` や `variables:` を兄弟として並べる形である。この形は 3 つの理由で崩れた。
 
-- **更新のたびに完全なリストを渡す。** `allowed_merge_methods` や `rules`、`reviewers` がこれにあたる
-- **リストの要素の追加・更新・削除に別の API を用意する。** variables や environment の variables がこれにあたる
+### 崩れた 3 つの点
 
-前者は要素が少なく短いリストに向く。長くなりうるリスト、あるいは要素ごとに権限や監査を分けたいリストでは後者が選ばれる。environment の variables に `POST /repos/{o}/{r}/environments/{env}/variables` という独立したパスがあるのはそのためで、**リストが environment のフィールドでなくなったわけではない**。
+**1 つの状態が複数のエンドポイントに散る。** リポジトリの Actions 設定は 4 つのパスに分かれている。当初これを `actions:` の下に平坦にマージした。フィールド名の衝突検査が要り、`artifact-and-log-retention` の `days` は他のフィールドと並べると何の日数か読めないので入れられなかった。**API がパスの側に文脈を寄せているフィールドが、平坦化で文脈を失う。**
 
-したがって settings.yml では、どちらの API でも同じように書く。
+**リソースがリストを持ち、そのリストに専用の API がある。** リストの更新方法には 2 通りある。更新のたびに完全なリストを渡すもの（`allowed_merge_methods`、`rules`、`reviewers`）と、要素の追加・更新・削除に別の API を持つもの（variables）である。後者が選ばれるのは、長くなりうるリストや要素ごとに権限を分けたいリストで、**リストがそのリソースのフィールドでなくなったわけではない**。だから environment の variables は environment の中に書く。しかしそうすると、`variables` は `PUT .../environments/{name}` のボディに無いフィールドになる。
 
-```yaml
-environments:
-  - name: production
-    wait_timer: 30
-    variables:
-      - name: DEPLOY_REGION
-        value: ap-northeast-1
-```
+**スコープの違いが構造に出ない。** repo レベルの variables がトップレベル `variables:`、environment レベルが `environments[].variables` になり、同名なのに置き場所が対応しない。
 
-`variables` は `PUT /repos/{o}/{r}/environments/{environment_name}` のリクエストボディには無い。それでも environment の状態の一部であり、宣言する側にとって `wait_timer` と区別する理由がない。差分を要素ごとの API 呼び出しに翻訳するのは ghs の仕事である。
+### パスをそのまま写す
 
-### 1 つの状態が複数のエンドポイントに散っている場合
+3 つとも、**キーをパスセグメントにする**と解ける。
 
-前節はリソースがリストを持つ場合だったが、リストでなくても同じことが起きる。リポジトリの Actions 設定は 4 つのパスに分かれている。
+- Actions の各エンドポイントが別のキーになるので、`days` は `artifact-and-log-retention:` の下に置かれて文脈を保つ。衝突検査も不要
+- `environments[].variables` は「environment の子パス」として自然に位置づく
+- repo の variables は `actions.variables`、environment のものは `environments[].variables` で、スコープが構造に出る
 
-- `PUT /repos/{o}/{r}/actions/permissions`: `enabled`、`allowed_actions`、`sha_pinning_required`
-- `PUT .../actions/permissions/workflow`: `default_workflow_permissions`、`can_approve_pull_request_reviews`
-- `PUT .../actions/permissions/fork-pr-contributor-approval`: `approval_policy`
-- `PUT .../actions/permissions/selected-actions`: `github_owned_allowed` ほか
+`repository:` というキーは廃止し、ファイルのルートを `/repos/{owner}/{repo}` そのものにする。`PATCH` のフィールドがトップレベルに直接並び、子パスがその下に来る。
 
-宣言する側から見れば「このリポジトリで Actions がどう動くか」という 1 つの状態なので、`actions:` の下に平坦に並べる。生成器の `operations` は同じリソース名の行を複数許し、フィールドはそれらの和になる。
+この形では、ノードがフィールドと子ノードの両方を持つ。
 
 ```yaml
-actions:
-  enabled: true
-  allowed_actions: all
-  sha_pinning_required: false
-  default_workflow_permissions: read
-  can_approve_pull_request_reviews: false
+has_issues: true      # PATCH /repos のフィールド
+actions:              # 子パス
 ```
 
-apply は、宣言されたフィールドを持つエンドポイントだけを呼ぶ。順序は `permissions` を先にする。どの action を選ぶかは、方針が `selected` になって初めて意味を持つため。
+一見、値と入れ物が同階層に混ざって読みにくいように見える。だが **environment で既に同じことをしている**（`wait_timer` と `variables` が並ぶ）。それを受け入れているなら、リポジトリを例外にする理由はない。むしろ「リソースはフィールドと子リソースを持つ」という形が全段で統一される。どちらであるかは、フィールド定義を見れば決まる。
 
-フィールドとエンドポイントの対応表は `internal/resource/actions.go` に手書きする。生成されるフィールド定義との食い違いは、「生成された全フィールドがどれかのエンドポイントに属する」ことを確かめるテストで検出する。これがないと、GitHub が足したフィールドが settings.yml では受理されるのに送られない、という状態になる。
+### 何をどこで表すか
 
-#### 条件付きで存在しないエンドポイント
+- **schema** は設定ファイルの木そのもの。各ノードが自分のパスセグメント、書き込みメソッド、フィールド定義、子ノードを持つ。パス上に存在するが操作を持たないノード（`/repos/{o}/{r}/actions` には何もない）は `KindNamespace` とし、そこに書かれたフィールドはエラーにする
+- **gen** はエンドポイントの一覧を「ファイル内のキー列」と対にして書き、木を組む。中間ノードはキー列から導かれるので書かない。ルートのフィールド名と子ノード名が衝突したら生成時にエラーにする
+- **config** は木に沿ってファイルを読む。トップレベルからキーを見て、子ノード名なら降り、そうでなければルート自身のフィールドとして検証する。だからタイポは「そのノードの書き込み可能フィールドではない」として報告される
+- **diff** は木の形をした `Plan` を返す。パスを文字列に畳んでから読み戻すのではなく、構造のまま持つ。`Change` はノード内の相対ラベルだけを持ち、どこにあるかは `Plan` の役割
+- **resource** は大半のノードで何も書かなくてよい。パスとメソッドが分かれば読み書きできる。手で書くのは GitHub が自分のパターンから外れる箇所だけ（ruleset のサーバ発行 id、environment の報告形と宣言形の相違）
 
-`selected-actions` は `allowed_actions` が `selected` のときにしか存在せず、それ以外では GET が 409 を返す。同様に private リポジトリ限定の設定は public で 422 になる。
+**apply の実行順**はパスの深さに従う。要素を作ってからその中身を入れる（存在しない environment に変数は入れられない）。コレクションは create → update → delete で、途中で失敗したときに残るのが「余分な要素」になる側に倒す。
 
-これらは失敗ではなく「そこには何も無い」という応答なので、該当フィールドを現在値から落として続行する。宣言していれば `(missing)` として差分に出る。これは「宣言キーが GET レスポンスに存在しない場合は差分扱いにする」という既定の方針がそのまま効く形になっている。
+**作成される要素の下は読まない。** GitHub がまだ知らないパスを問い合わせても 404 になるだけで、そこに宣言されたものはすべて要素と一緒に到着する。
+
+### 条件付きで存在しないパス
+
+`selected-actions` は `allowed_actions` が `selected` のときにしか存在せず、それ以外では GET が 409 を返す。private 限定の設定は public で 422 になる。
+
+これらは失敗ではなく「そこには何も無い」という応答なので、現在値を空として続行する。宣言していれば差分に出る。「宣言キーが GET レスポンスに存在しない場合は差分扱いにする」という既定の方針がそのまま効く。
 
 403 や 5xx は区別してエラーとして伝える。「設定が適用されない」ことと「読めない」ことは違う。
 
-#### 入れないと決めたエンドポイント
+### 入れ子のコレクションの数え方
 
-`actions/permissions/artifact-and-log-retention` は入れない。唯一のフィールドが `days` という名前で、`actions:` の下に他のフィールドと並べると何の日数か読み取れない。API がパスの側に文脈を寄せている例であり、「API の語彙をそのまま書く」という方針は、フィールド名がその文脈を持ち歩いていることを前提にしている。前提が崩れる場合まで無理に適用しない。
+入れ子の要素の増減は、トップレベルのような create・delete では**なく**、親要素の update として数える。environment の変数が増えることは environment の変更であって、変数が独立したオブジェクトとして生まれるわけではない。ここを create として数えると「1 to create」が変数の数だけ出て、要約がリソースの数を語らなくなる。
 
-`actions/permissions/access` と `fork-pr-workflows-private-repos` も外した。private / internal 限定で、public リポジトリでは実測できないため。条件付きの仕組みには乗るので、必要になれば行を足すだけで入る。
+表示は全段で同じシーケンス形式にする。入れ子だけキー付き（`variables["X"]`）で出すと、settings.yml には無い形を見せることになる。要素とエントリは同じ構造なので、描画も同じ関数が自分を呼ぶ形で書ける。
 
-### 原則の言い直し
+### organization への道
 
-「settings.yml は REST API のリクエストボディそのもの」という言い方は、Phase 1 の `repository` が 1 つの PATCH に対応していたから成り立っていた。コレクションを入れた時点でこれは正確でなくなっている。
-
-- `environments` の `name` はパスに入るので、どのリクエストボディにも存在しない
-- コレクションのトップレベルキー 1 つが、一覧・作成・更新・削除の 4 操作に対応する
-
-正確には、**トップレベルキーは管理対象のリソースを指し、その下はそのリソースを記述する API の語彙で書く**。何回 API を叩いてその状態に到達するかは実装の側の問題であって、宣言する側が知る必要はない。独自の抽象を挟まないという方針は変わらない。抽象を挟まない対象が「1 回のリクエスト」ではなく「リソースの状態」だというだけである。
-
-この読み方は Phase 3 の判断にも効く。`topics` は `PUT /repos/{o}/{r}/topics` という別の API を持つが、リポジトリの状態の一部なので `repository` の下に書ける。
-
-### 入れ子のコレクション
-
-`environments` の `variables` は、要素の中にあるコレクションとして実装する。
-
-**フィールド定義**は生成側で対応する。`gen/main.go` の `nestedOperations` に「どのリソースの、どのフィールドが、どの作成 API に対応するか」を書き、`POST /repos/{o}/{r}/environments/{environment_name}/variables` のリクエストボディから要素のフィールドを生成する。`schema.Field` に `Elements` を持たせ、非 nil なら入れ子コレクションとする。
-
-**検証**は外側と同じ規則を適用する。`name` 必須、重複エラー、`variables:`（null）はエラー、`variables: []` は全削除の宣言。トップレベルのコレクションと入れ子で規則が違う理由がないので、要素の検証は共通の関数に切り出す。
-
-**差分**では、入れ子のフィールドを通常の比較から除外し、name で突き合わせて別に比較する。パスは `environments["production"].variables["DEPLOY_REGION"].value` の 2 段になる。`Change` には親要素を指す `Element` に加えて、入れ子のフィールド名 `Nested` とエントリ名 `Entry` を持たせる。パスにも同じ情報は入っているが、表示のたびに自分の吐いたパスを読み返すことになるため、構造のまま持つ。
-
-入れ子の要素の増減は、トップレベルのような create・delete では**なく** update として扱う。片側にしか無い値（`CurrentMissing` / `DesiredMissing`）として表す。environment の変数が増えることは environment の変更であって、変数が独立したオブジェクトとして生まれるわけではない。ここを create として数えると「1 to create」が変数の数だけ出て、要約がリソースの数を語らなくなる。
-
-**表示**も外側と同じシーケンス形式にする。入れ子だけキー付き（`variables["X"]`）で出すと、settings.yml には無い形を見せることになる。
-
-```
-~ environments: [
-    ~ {
-          name: "production"
-        ~ variables: [
-            ~ {
-                  name:  "REGION"
-                ~ value: "ap-northeast-1" -> "us-east-1"
-              },
-            + {
-                + name:  "ADD"
-                + value: "new"
-              },
-          ]
-      },
-  ]
-```
-
-要素とエントリは同じ構造なので、描画も同じ関数が自分を呼ぶ形で書ける。
-
-**apply** は `Environments` の中に閉じ込める。`Create` と `Update` がどちらも「environment 本体を PUT してから変数を揃える」という同じ手順になるので、実体は 1 つにまとめる。変数の順序は create → update → delete で、トップレベルと同じく途中で失敗したときに余分が残る側に倒す。environment を先に作るのは、存在しない environment に変数を入れられないため。
-
-`Collection` interface は変えていない。入れ子は「そのリソースをどう更新するか」の内側の話であって、コレクションの扱い方そのものは変わらないため。
-
-要素の識別は各段で `name` のままでよい。変数は environment と名前の組で決まるが、入れ子の中では親が既に決まっている。
+ファイル 1 つ = 1 リソースツリーのルートなので、organization の設定をやるなら別ファイルで `/orgs/{org}` をルートにする形になる。`repository:` / `organization:` というセクションで同一ファイルに同居させるより、スコープがファイル単位で分かれるほうが明快で、必要な token の権限も違う。
 
 ## Phase 3 以降
 

@@ -1,59 +1,70 @@
-# Each top-level key is a GitHub REST API resource and the fields below it are
-# that resource's fields, spelled exactly as the API spells them. Fields left
-# out of this file are not managed: ghs never touches them.
+# The file is the repository. Its top level is the body of
+# PATCH /repos/{owner}/{repo}, so the fields of that request are written here
+# directly, and anything GitHub reaches through a longer path goes under a key
+# named after it.
 #
-# repository maps to PATCH /repos/{owner}/{repo}.
-repository:
-  description: Manage GitHub repository settings from a settings file
-  has_issues: true
-  has_projects: false
-  has_wiki: false
-  has_discussions: false
+# Fields left out of this file are not managed: ghs never touches them.
+description: Manage GitHub repository settings from a settings file
+has_issues: true
+has_projects: false
+has_wiki: false
+has_discussions: false
 
-  allow_squash_merge: true
-  allow_merge_commit: false
-  allow_rebase_merge: false
-  allow_auto_merge: true
-  allow_update_branch: true
-  delete_branch_on_merge: true
+allow_squash_merge: true
+allow_merge_commit: false
+allow_rebase_merge: false
+allow_auto_merge: true
+allow_update_branch: true
+delete_branch_on_merge: true
 
-  squash_merge_commit_title: PR_TITLE
-  squash_merge_commit_message: PR_BODY
+squash_merge_commit_title: PR_TITLE
+squash_merge_commit_message: PR_BODY
 
-  web_commit_signoff_required: false
+web_commit_signoff_required: false
 
-# actions covers how GitHub Actions runs here. GitHub spreads these over four
-# endpoints under /repos/{owner}/{repo}/actions/permissions; they are one thing
-# to declare, so they are written as one.
-#
-# default_workflow_permissions is the reason this key is worth having: it
-# decides whether every workflow runs with a token that can write to the
-# repository, and it is a single click away in the web interface.
+# /repos/{owner}/{repo}/actions -- a path segment with no settings of its own.
 actions:
-  enabled: true
-  allowed_actions: all
-  sha_pinning_required: false
+  # .../actions/permissions
+  #
+  # default_workflow_permissions is the reason this is worth declaring: it
+  # decides whether every workflow runs with a token that can write to the
+  # repository, and it is a single click away in the web interface.
+  permissions:
+    enabled: true
+    allowed_actions: all
+    sha_pinning_required: false
 
-  default_workflow_permissions: read
-  can_approve_pull_request_reviews: false
+    # .../actions/permissions/workflow
+    workflow:
+      default_workflow_permissions: read
+      can_approve_pull_request_reviews: false
 
-  approval_policy: first_time_contributors
+    # .../actions/permissions/fork-pr-contributor-approval
+    fork-pr-contributor-approval:
+      approval_policy: first_time_contributors
 
-# The keys below are collections: a set of named things rather than one object,
-# so each is written as a sequence whose entries are the body that creates one.
+    # .../actions/permissions/artifact-and-log-retention
+    #
+    # "days" says nothing on its own; under the key naming the endpoint that
+    # writes it, it does. That is the whole reason the file follows the paths.
+    artifact-and-log-retention:
+      days: 90
+
+# Keys holding a sequence are collections: a set of named things rather than
+# one object. Each entry is the body that creates one, with name identifying it.
 #
-# Declaring one of these keys puts the WHOLE set under management. An entry
-# GitHub has and this file does not is deleted, which the plan shows as a
-# removal before anything is sent. Leave a key out and ghs does not touch those
-# settings at all.
+# Declaring such a key puts the WHOLE set under management. An entry GitHub has
+# and this file does not is deleted, which the plan shows as a removal before
+# anything is sent. Leave a key out and ghs does not touch those settings at
+# all.
 
-# rulesets maps to POST /repos/{owner}/{repo}/rulesets.
+# .../rulesets
 rulesets:
   - name: example
     target: branch
     # evaluate records violations without blocking them. Switch to active to
     # have the rules enforced.
-    enforcement: active
+    enforcement: evaluate
     conditions:
       ref_name:
         include: ['~DEFAULT_BRANCH']
@@ -72,30 +83,18 @@ rulesets:
           require_code_owner_review: false
           require_last_push_approval: false
           required_review_thread_resolution: false
-          allowed_merge_methods: ["merge"]
 
-# variables maps to POST /repos/{owner}/{repo}/actions/variables.
-#
-# Values appear in the plan as they are. A variable is where GitHub puts
-# configuration that is not secret, and hiding the values would take the point
-# out of reviewing a change to one. Secrets belong elsewhere: ghs does not
-# manage them.
-variables:
-  - name: AAA
-    value: hi
-  - name: EXAMPLE_VARIABLE
-    value: hello
-
-# environments maps to PUT /repos/{owner}/{repo}/environments/{name}, which
-# takes the name in the path. The name is written here all the same, because it
-# is what identifies the entry.
+# .../environments/{name}
 environments:
   - name: example
     wait_timer: 0
 
-    # An environment's variables have an endpoint of their own, reached one
-    # variable at a time. That is how they are written, not what they are:
-    # they belong to the environment, so they are declared inside it.
+    # .../environments/{name}/variables
+    #
+    # Values appear in the plan as they are. A variable is where GitHub puts
+    # configuration that is not secret, and hiding the values would take the
+    # point out of reviewing a change to one. Secrets belong elsewhere: ghs
+    # does not manage them.
     variables:
       - name: DEPLOY_REGION
         value: us-east-1

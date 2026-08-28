@@ -17,69 +17,77 @@ import (
 // DefaultPath is where ghs looks for the settings file.
 const DefaultPath = ".github/settings.yml"
 
-// Config is a validated settings file.
-type Config struct {
-	// Declared holds, per single-object resource, the fields declared for it.
-	// Values are normalized so they can be compared with API responses
-	// directly.
-	//
-	// A field that is absent here is not managed: ghs never touches it.
-	Declared map[string]map[string]any
+// Declaration is what was declared at one node of the settings file.
+//
+// The file is a tree that follows the API's paths, and so is this: Fields holds
+// the node's own settings, and Children what was declared under each key
+// beneath it. Load returns the root, which is the repository.
+type Declaration struct {
+	// Node is what the schema says may be written here.
+	Node schema.Node
 
-	// Collections holds, per collection resource, its declared elements keyed
-	// by name.
+	// Fields holds this node's own declared fields, normalized so they compare
+	// with API responses directly. A field absent here is not managed.
 	//
-	// Where a field is the unit of management for the resources above, an
-	// element is the unit here, and declaring the resource declares the whole
-	// set: an entry present with no elements asks for every existing one to be
-	// deleted, which is not what the resource being absent means.
-	Collections map[string]map[string]map[string]any
+	// It is nil for a collection, whose declaration is Elements.
+	Fields map[string]any
+
+	// Elements holds a collection's declared elements, keyed by name.
+	//
+	// Declaring the key declares the whole set: an element the API reports and
+	// this map does not hold is deleted. An empty non-nil map asks for every
+	// existing element to go, which is not what the key being absent means.
+	Elements map[string]map[string]any
+
+	// Children holds what was declared under the keys beneath this node.
+	// Elements of a collection share it: an element's own children are held by
+	// ElementChildren.
+	Children map[string]*Declaration
+
+	// ElementChildren holds, per element name, what was declared under the
+	// keys beneath that element.
+	ElementChildren map[string]map[string]*Declaration
 }
 
-// Options adjusts how a settings file is read. It carries nothing today and
-// exists so that adding an option later does not change every call site.
-type Options struct{}
-
-// ResourceNames returns the declared resource names in sorted order.
-func (c Config) ResourceNames() []string {
-	names := make([]string, 0, len(c.Declared)+len(c.Collections))
-	for name := range c.Declared {
-		names = append(names, name)
-	}
-	for name := range c.Collections {
+// ChildNames returns the declared child keys in sorted order.
+func (d *Declaration) ChildNames() []string {
+	names := make([]string, 0, len(d.Children))
+	for name := range d.Children {
 		names = append(names, name)
 	}
 	sort.Strings(names)
 	return names
 }
 
-// IsCollection reports whether the named resource was declared as a set of
-// elements rather than as a single object.
-func (c Config) IsCollection(name string) bool {
-	_, ok := c.Collections[name]
-	return ok
+// Child returns what was declared under name.
+func (d *Declaration) Child(name string) (*Declaration, bool) {
+	child, ok := d.Children[name]
+	return child, ok
 }
 
-// NestedCollections names the fields of the resource's elements that are
-// collections in their own right, such as the variables of an environment.
-//
-// These are compared entry by entry rather than as plain values, because the
-// API reaches them one entry at a time.
-func (c Config) NestedCollections(resource string) []string {
-	r, ok := schema.Lookup(resource)
-	if !ok {
-		return nil
+// ElementChild returns what was declared under name within one element.
+func (d *Declaration) ElementChild(element, name string) (*Declaration, bool) {
+	child, ok := d.ElementChildren[element][name]
+	return child, ok
+}
+
+// ElementChildNames returns the declared child keys of one element, sorted.
+func (d *Declaration) ElementChildNames(element string) []string {
+	names := make([]string, 0, len(d.ElementChildren[element]))
+	for name := range d.ElementChildren[element] {
+		names = append(names, name)
 	}
-	return r.NestedCollections()
+	sort.Strings(names)
+	return names
 }
 
 // Load reads and validates the settings file at path.
-func Load(path string, opts Options) (*Config, error) {
+func Load(path string) (*Declaration, error) {
 	b, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("read %s: %w", path, err)
 	}
-	cfg, err := Parse(b, opts)
+	cfg, err := Parse(b)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
@@ -87,98 +95,126 @@ func Load(path string, opts Options) (*Config, error) {
 }
 
 // Parse validates settings file contents.
-func Parse(b []byte, opts Options) (*Config, error) {
-	// Resources are decoded as raw YAML so that no field is coerced into a Go
-	// type before validation.
-	var resources map[string]any
+//
+// The top level of the file is the repository itself, so its fields are the
+// fields of PATCH /repos/{owner}/{repo}, and every other key names a path
+// reached from there.
+func Parse(b []byte) (*Declaration, error) {
+	// Decoded as raw YAML so that no field is coerced into a Go type before
+	// validation.
+	var declared map[string]any
 
 	dec := yaml.NewDecoder(strings.NewReader(string(b)))
-	if err := dec.Decode(&resources); err != nil {
+	if err := dec.Decode(&declared); err != nil {
 		return nil, fmt.Errorf("parse: %w", err)
 	}
-	if len(resources) == 0 {
-		return nil, errors.New("no resources declared")
+	if len(declared) == 0 {
+		return nil, errors.New("nothing declared")
 	}
 
-	cfg := &Config{
-		Declared:    make(map[string]map[string]any, len(resources)),
-		Collections: make(map[string]map[string]map[string]any, len(resources)),
-	}
-	var problems []string
-
-	for _, name := range sortedKeys(resources) {
-		resource, ok := schema.Lookup(name)
-		if !ok {
-			problems = append(problems, fmt.Sprintf("%s: unknown resource (this build manages: %s)",
-				name, strings.Join(schema.Names(), ", ")))
-			continue
-		}
-
-		if resource.IsCollection() {
-			elements, elementProblems := parseCollection(name, resources[name], resource, opts)
-			problems = append(problems, elementProblems...)
-			if elements != nil {
-				cfg.Collections[name] = elements
-			}
-			continue
-		}
-
-		declared, ok := resources[name].(map[string]any)
-		if !ok {
-			problems = append(problems, fmt.Sprintf("%s: expected a mapping of fields", name))
-			continue
-		}
-		if len(declared) == 0 {
-			problems = append(problems, fmt.Sprintf("%s: no fields declared", name))
-			continue
-		}
-
-		problems = append(problems, validateFields(name, declared, resource.Fields, opts)...)
-
-		normalized, err := diff.NormalizeMap(declared)
-		if err != nil {
-			problems = append(problems, fmt.Sprintf("%s: %v", name, err))
-			continue
-		}
-		cfg.Declared[name] = normalized
-	}
-
+	root, problems := parseNode("", schema.Root(), declared)
 	if len(problems) > 0 {
 		return nil, errors.New(strings.Join(problems, "\n"))
 	}
-	return cfg, nil
+	return root, nil
 }
 
-// validateFields checks declared fields against the generated definitions and
-// returns one message per problem, so a single run reports everything wrong
-// with the file rather than only the first mistake.
-func validateFields(path string, declared map[string]any, fields map[string]schema.Field, opts Options) []string {
+// parseNode validates what was declared at one node, and everything below it.
+func parseNode(path string, node schema.Node, declared any) (*Declaration, []string) {
+	if node.IsCollection() {
+		return parseCollectionNode(path, node, declared)
+	}
+
+	fields, ok := declared.(map[string]any)
+	if !ok {
+		return nil, []string{fmt.Sprintf("%s: expected a mapping of fields", or(path, "the settings file"))}
+	}
+	if len(fields) == 0 {
+		return nil, []string{fmt.Sprintf("%s: nothing declared", or(path, "the settings file"))}
+	}
+
+	// The keys naming nodes are taken out first, so that what remains is this
+	// node's own fields and an unknown key is reported as such.
+	own, children, problems := split(path, node, fields)
+
+	// A namespace stands for a path segment and has no operation of its own,
+	// so a field written directly under it has nowhere to go.
+	if node.IsNamespace() {
+		for _, name := range sortedKeys(own) {
+			problems = append(problems, fmt.Sprintf("%s.%s: %s holds no settings of its own", path, name, path))
+		}
+		own = nil
+	}
+
+	problems = append(problems, validateFields(path, own, node.Fields)...)
+
+	normalized, err := diff.NormalizeMap(own)
+	if err != nil {
+		problems = append(problems, fmt.Sprintf("%s: %v", or(path, "the settings file"), err))
+	}
+
+	return &Declaration{Node: node, Fields: normalized, Children: children}, problems
+}
+
+// split separates the keys that name nodes from the fields of the node itself.
+func split(path string, node schema.Node, declared map[string]any) (map[string]any, map[string]*Declaration, []string) {
+	own := map[string]any{}
+	children := map[string]*Declaration{}
+	var problems []string
+
+	for _, name := range sortedKeys(declared) {
+		child, isNode := node.Child(name)
+		if !isNode {
+			own[name] = declared[name]
+			continue
+		}
+
+		parsed, childProblems := parseNode(join(path, name), child, declared[name])
+		problems = append(problems, childProblems...)
+		if parsed != nil {
+			children[name] = parsed
+		}
+	}
+
+	return own, children, problems
+}
+
+func join(path, name string) string {
+	if path == "" {
+		return name
+	}
+	return path + "." + name
+}
+
+func or(path, fallback string) string {
+	if path == "" {
+		return fallback
+	}
+	return path
+}
+
+// validateFields checks declared fields against the description and returns
+// one message per problem, so a single run reports everything wrong with the
+// file rather than only the first mistake.
+func validateFields(path string, declared map[string]any, fields map[string]schema.Field) []string {
 	var problems []string
 
 	for _, name := range sortedKeys(declared) {
 		value := declared[name]
-		fieldPath := path + "." + name
+		fieldPath := join(path, name)
 
 		field, known := fields[name]
 		if !known {
-			problems = append(problems, fmt.Sprintf("%s: not a writable field of this resource", fieldPath))
+			problems = append(problems, fmt.Sprintf("%s: not a writable field here", fieldPath))
 			continue
 		}
 
-		problems = append(problems, validateValue(fieldPath, value, field, opts)...)
+		problems = append(problems, validateValue(fieldPath, value, field)...)
 	}
 	return problems
 }
 
-func validateValue(path string, value any, field schema.Field, opts Options) []string {
-	// A field that is a collection of its own is declared as a sequence of
-	// named entries, and validated by the same rules as a top-level one --
-	// including that null is not one of the ways to write it.
-	if field.IsCollection() {
-		_, problems := elementsOf(path, value, field.Elements, opts)
-		return problems
-	}
-
+func validateValue(path string, value any, field schema.Field) []string {
 	if value == nil {
 		// Declaring null means "clear this field", and it is passed through
 		// as-is. Whether a given field accepts null is not checked here: the
@@ -210,7 +246,7 @@ func validateValue(path string, value any, field schema.Field, opts Options) []s
 	// Nested objects are validated to the depth the description defines. An
 	// object with no declared properties stays free-form.
 	if nested, ok := value.(map[string]any); ok && len(field.Fields) > 0 {
-		problems = append(problems, validateFields(path, nested, field.Fields, opts)...)
+		problems = append(problems, validateFields(path, nested, field.Fields)...)
 	}
 
 	return problems

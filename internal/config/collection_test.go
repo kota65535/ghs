@@ -7,23 +7,24 @@ import (
 
 func TestParseCollectionKeepsElementsByName(t *testing.T) {
 	cfg := mustParse(t, `
-variables:
-  - name: DEPLOY_REGION
-    value: ap-northeast-1
-  - name: LOG_LEVEL
-    value: info
+actions:
+  variables:
+    - name: DEPLOY_REGION
+      value: ap-northeast-1
+    - name: LOG_LEVEL
+      value: info
 `)
 
-	elements := cfg.Collections["variables"]
-	if len(elements) != 2 {
-		t.Fatalf("declared %d elements, want 2: %+v", len(elements), elements)
+	variables := child(t, cfg, "actions", "variables")
+	if len(variables.Elements) != 2 {
+		t.Fatalf("declared %d elements, want 2: %+v", len(variables.Elements), variables.Elements)
 	}
-	if elements["DEPLOY_REGION"]["value"] != "ap-northeast-1" {
-		t.Errorf("DEPLOY_REGION = %+v, want its declared value", elements["DEPLOY_REGION"])
+	if variables.Elements["DEPLOY_REGION"]["value"] != "ap-northeast-1" {
+		t.Errorf("DEPLOY_REGION = %+v, want its declared value", variables.Elements["DEPLOY_REGION"])
 	}
 	// The name stays part of the element: it is what the create request sends.
-	if elements["LOG_LEVEL"]["name"] != "LOG_LEVEL" {
-		t.Errorf("LOG_LEVEL = %+v, want the name kept", elements["LOG_LEVEL"])
+	if variables.Elements["LOG_LEVEL"]["name"] != "LOG_LEVEL" {
+		t.Errorf("LOG_LEVEL = %+v, want the name kept", variables.Elements["LOG_LEVEL"])
 	}
 }
 
@@ -33,21 +34,21 @@ func TestParseCollectionAcceptsAnEmptySequence(t *testing.T) {
 	// out, which declares nothing and touches nothing.
 	cfg := mustParse(t, "rulesets: []\n")
 
-	elements, declared := cfg.Collections["rulesets"]
-	if !declared {
+	rulesets := child(t, cfg, "rulesets")
+	if rulesets.Elements == nil {
 		t.Fatal("rulesets was dropped, want an empty set kept as a declaration")
 	}
-	if len(elements) != 0 {
-		t.Errorf("elements = %+v, want none", elements)
+	if len(rulesets.Elements) != 0 {
+		t.Errorf("elements = %+v, want none", rulesets.Elements)
 	}
 }
 
 func TestParseCollectionRejectsNull(t *testing.T) {
-	// A single-object resource reads null as "clear this", but for a
-	// collection a half-written line would declare the deletion of every
-	// element. There is an explicit way to say that, so null means nothing.
+	// A field reads null as "clear this", but for a collection a half-written
+	// line would declare the deletion of every element. There is an explicit
+	// way to say that, so null means nothing.
 	for _, yaml := range []string{"rulesets:\n", "rulesets: null\n"} {
-		_, err := parse(t, yaml, Options{})
+		_, err := parse(t, yaml)
 		if err == nil {
 			t.Errorf("Parse(%q) succeeded, want null rejected", yaml)
 			continue
@@ -59,7 +60,7 @@ func TestParseCollectionRejectsNull(t *testing.T) {
 }
 
 func TestParseCollectionRejectsAMapping(t *testing.T) {
-	_, err := parse(t, "variables:\n  DEPLOY_REGION: ap-northeast-1\n", Options{})
+	_, err := parse(t, "rulesets:\n  protect-main: {}\n")
 	if err == nil || !strings.Contains(err.Error(), "sequence") {
 		t.Errorf("err = %v, want a sequence to be asked for", err)
 	}
@@ -67,11 +68,11 @@ func TestParseCollectionRejectsAMapping(t *testing.T) {
 
 func TestParseCollectionRequiresAName(t *testing.T) {
 	for name, yaml := range map[string]string{
-		"missing": "variables:\n  - value: 1\n",
-		"null":    "variables:\n  - name:\n    value: 1\n",
-		"empty":   "variables:\n  - name: \"\"\n    value: 1\n",
+		"missing": "actions:\n  variables:\n    - value: 1\n",
+		"null":    "actions:\n  variables:\n    - name:\n      value: 1\n",
+		"empty":   "actions:\n  variables:\n    - name: \"\"\n      value: 1\n",
 	} {
-		_, err := parse(t, yaml, Options{})
+		_, err := parse(t, yaml)
 		if err == nil {
 			t.Errorf("%s: Parse succeeded, want a name required", name)
 			continue
@@ -86,20 +87,21 @@ func TestParseCollectionRejectsDuplicateNames(t *testing.T) {
 	// Two elements of the same name would silently drop one, and which one
 	// depends on the order they are read in.
 	_, err := parse(t, `
-variables:
-  - name: A
-    value: 1
-  - name: A
-    value: 2
-`, Options{})
+actions:
+  variables:
+    - name: A
+      value: 1
+    - name: A
+      value: 2
+`)
 	if err == nil || !strings.Contains(err.Error(), "declared twice") {
 		t.Errorf("err = %v, want the duplicate reported", err)
 	}
 }
 
-func TestParseCollectionRejectsANonMappingElement(t *testing.T) {
-	_, err := parse(t, "variables:\n  - DEPLOY_REGION\n", Options{})
-	if err == nil || !strings.Contains(err.Error(), "variables[0]") {
+func TestParseCollectionLocatesABadElementByPosition(t *testing.T) {
+	_, err := parse(t, "actions:\n  variables:\n    - DEPLOY_REGION\n")
+	if err == nil || !strings.Contains(err.Error(), "actions.variables[0]") {
 		t.Errorf("err = %v, want the offending element located by index", err)
 	}
 }
@@ -109,7 +111,7 @@ func TestParseCollectionValidatesElementFields(t *testing.T) {
 rulesets:
   - name: protect-main
     enforcemnt: active
-`, Options{})
+`)
 	if err == nil || !strings.Contains(err.Error(), `rulesets["protect-main"].enforcemnt`) {
 		t.Errorf("err = %v, want the typo reported under the element name", err)
 	}
@@ -120,7 +122,7 @@ func TestParseCollectionValidatesEnums(t *testing.T) {
 rulesets:
   - name: protect-main
     enforcement: sometimes
-`, Options{})
+`)
 	if err == nil || !strings.Contains(err.Error(), "is not one of") {
 		t.Errorf("err = %v, want an enum error", err)
 	}
@@ -129,53 +131,30 @@ rulesets:
 	}
 }
 
-func TestParseCollectionValidatesNestedFields(t *testing.T) {
+func TestParseCollectionNormalizesNestedNumbers(t *testing.T) {
 	cfg := mustParse(t, `
 rulesets:
   - name: protect-main
     target: branch
     enforcement: active
-    conditions:
-      ref_name:
-        include: ["~DEFAULT_BRANCH"]
-        exclude: []
     rules:
       - type: pull_request
         parameters:
           required_approving_review_count: 1
 `)
 
-	element := cfg.Collections["rulesets"]["protect-main"]
-	conditions := element["conditions"].(map[string]any)
-	refName := conditions["ref_name"].(map[string]any)
-	if len(refName["include"].([]any)) != 1 {
-		t.Errorf("include = %+v, want one pattern", refName["include"])
-	}
-
-	// Numbers inside a rule must normalize like anything else, or the plan
-	// reports a change apply cannot resolve.
+	element := child(t, cfg, "rulesets").Elements["protect-main"]
 	rules := element["rules"].([]any)
 	parameters := rules[0].(map[string]any)["parameters"].(map[string]any)
 	if _, ok := parameters["required_approving_review_count"].(float64); !ok {
 		t.Errorf("required_approving_review_count has type %T, want float64",
 			parameters["required_approving_review_count"])
 	}
-
-	_, err := parse(t, `
-rulesets:
-  - name: protect-main
-    conditions:
-      ref_nmae:
-        include: []
-`, Options{})
-	if err == nil || !strings.Contains(err.Error(), "conditions.ref_nmae") {
-		t.Errorf("err = %v, want the nested typo reported", err)
-	}
 }
 
 func TestParseCollectionLeavesFreeFormContentAlone(t *testing.T) {
 	// A ruleset rule is described as a choice between two dozen shapes, so the
-	// definitions declare no fields for one. Its content goes to the API to
+	// description declares no fields for one. Its content goes to the API to
 	// judge rather than being rejected here.
 	cfg := mustParse(t, `
 rulesets:
@@ -185,61 +164,15 @@ rulesets:
         parameters:
           allowed_merge_methods: [squash]
 `)
-	rules := cfg.Collections["rulesets"]["protect-main"]["rules"].([]any)
+	rules := child(t, cfg, "rulesets").Elements["protect-main"]["rules"].([]any)
 	if len(rules) != 1 {
 		t.Fatalf("rules = %+v, want one rule", rules)
 	}
 }
 
-func TestParseReportsEveryProblemInACollectionAtOnce(t *testing.T) {
-	_, err := parse(t, `
-variables:
-  - name: A
-    valeu: 1
-  - name: B
-    value: 2
-    extra: 3
-`, Options{})
-	if err == nil {
-		t.Fatal("Parse succeeded, want errors")
-	}
-	for _, want := range []string{"valeu", "extra"} {
-		if !strings.Contains(err.Error(), want) {
-			t.Errorf("err = %v, want it to mention %s", err, want)
-		}
-	}
-}
-
-func TestParseMixesObjectAndCollectionResources(t *testing.T) {
-	cfg := mustParse(t, `
-repository:
-  has_issues: true
-
-variables:
-  - name: A
-    value: "1"
-`)
-
-	if cfg.Declared["repository"]["has_issues"] != true {
-		t.Errorf("repository = %+v, want has_issues true", cfg.Declared["repository"])
-	}
-	if cfg.Collections["variables"]["A"]["value"] != "1" {
-		t.Errorf("variables = %+v, want A declared", cfg.Collections["variables"])
-	}
-
-	names := cfg.ResourceNames()
-	want := []string{"repository", "variables"}
-	if len(names) != len(want) || names[0] != want[0] || names[1] != want[1] {
-		t.Errorf("ResourceNames = %v, want %v", names, want)
-	}
-	if !cfg.IsCollection("variables") || cfg.IsCollection("repository") {
-		t.Error("IsCollection does not tell the two kinds apart")
-	}
-}
-
-func TestParseKeepsNestedCollectionEntries(t *testing.T) {
-	// The variables of an environment are reached through an API of their own,
-	// which does not stop them being a field of the environment.
+func TestParseKeepsWhatIsDeclaredUnderAnElement(t *testing.T) {
+	// The variables of an environment are reached through an endpoint of their
+	// own, which does not stop them being written inside the environment.
 	cfg := mustParse(t, `
 environments:
   - name: production
@@ -249,27 +182,25 @@ environments:
         value: ap-northeast-1
 `)
 
-	production := cfg.Collections["environments"]["production"]
-	variables, ok := production["variables"].([]any)
-	if !ok {
-		t.Fatalf("variables = %+v, want a sequence", production["variables"])
+	environments := child(t, cfg, "environments")
+	if environments.Elements["production"]["wait_timer"] != float64(30) {
+		t.Errorf("production = %+v, want wait_timer 30", environments.Elements["production"])
 	}
-	if len(variables) != 1 {
-		t.Fatalf("declared %d variables, want 1", len(variables))
-	}
-	if variables[0].(map[string]any)["value"] != "ap-northeast-1" {
-		t.Errorf("variables[0] = %+v, want its declared value", variables[0])
+	// The variables are not one of the environment's own fields.
+	if _, isField := environments.Elements["production"]["variables"]; isField {
+		t.Error("variables was taken for a field of the environment")
 	}
 
-	if nested := cfg.NestedCollections("environments"); len(nested) != 1 || nested[0] != "variables" {
-		t.Errorf("NestedCollections = %v, want [variables]", nested)
+	variables, ok := environments.ElementChild("production", "variables")
+	if !ok {
+		t.Fatal("nothing declared under production.variables")
 	}
-	if nested := cfg.NestedCollections("variables"); len(nested) != 0 {
-		t.Errorf("NestedCollections(variables) = %v, want none", nested)
+	if variables.Elements["DEPLOY_REGION"]["value"] != "ap-northeast-1" {
+		t.Errorf("variables = %+v, want the declared value", variables.Elements)
 	}
 }
 
-func TestParseValidatesNestedCollectionEntries(t *testing.T) {
+func TestParseValidatesWhatIsDeclaredUnderAnElement(t *testing.T) {
 	for name, tc := range map[string]struct{ yaml, want string }{
 		"unknown field": {
 			yaml: "environments:\n  - name: production\n    variables:\n      - name: A\n        valeu: 1\n",
@@ -292,7 +223,7 @@ func TestParseValidatesNestedCollectionEntries(t *testing.T) {
 			want: "[]",
 		},
 	} {
-		_, err := parse(t, tc.yaml, Options{})
+		_, err := parse(t, tc.yaml)
 		if err == nil {
 			t.Errorf("%s: Parse succeeded, want an error", name)
 			continue
@@ -303,21 +234,16 @@ func TestParseValidatesNestedCollectionEntries(t *testing.T) {
 	}
 }
 
-func TestParseAcceptsAnEmptyNestedCollection(t *testing.T) {
-	// As with a top-level collection, declaring no entries asks for the ones
-	// that exist to go.
+func TestParseAcceptsAnEmptySequenceUnderAnElement(t *testing.T) {
+	// As with a collection at the top level, declaring no entries asks for the
+	// ones that exist to go.
 	cfg := mustParse(t, "environments:\n  - name: production\n    variables: []\n")
 
-	production := cfg.Collections["environments"]["production"]
-	variables, ok := production["variables"].([]any)
-	if !ok || len(variables) != 0 {
-		t.Errorf("variables = %+v, want an empty sequence kept", production["variables"])
+	variables, ok := child(t, cfg, "environments").ElementChild("production", "variables")
+	if !ok {
+		t.Fatal("nothing declared under production.variables")
 	}
-}
-
-func TestParseRejectsASequenceForASingleObjectResource(t *testing.T) {
-	_, err := parse(t, "repository:\n  - has_issues: true\n", Options{})
-	if err == nil || !strings.Contains(err.Error(), "mapping") {
-		t.Errorf("err = %v, want a mapping to be asked for", err)
+	if variables.Elements == nil || len(variables.Elements) != 0 {
+		t.Errorf("elements = %+v, want an empty set kept", variables.Elements)
 	}
 }

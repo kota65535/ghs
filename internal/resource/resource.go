@@ -1,13 +1,19 @@
-// Package resource maps the top-level keys of settings.yml onto the GitHub
-// REST API operations that read and write them.
+// Package resource reads and writes the settings a node of settings.yml
+// stands for.
+//
+// Most nodes need nothing said about them: the schema records the path and the
+// method, and Object or Collection does the rest. What is written here by hand
+// is the handful of places where GitHub does not follow its own pattern -- a
+// ruleset addressed by a server-issued id, an environment whose reported shape
+// differs from the one that declares it.
 package resource
 
 import (
 	"context"
 	"fmt"
 	"io"
-	"sort"
-	"strings"
+
+	"github.com/kota65535/ghs/internal/schema"
 )
 
 // Client is the subset of go-gh's REST client that ghs uses.
@@ -27,61 +33,104 @@ type Repo struct {
 
 func (r Repo) String() string { return r.Owner + "/" + r.Name }
 
-// Resource reads and writes one API resource.
-//
-// Only single-object resources fit this interface. Collections keyed by name,
-// such as rulesets or variables, need create, update and delete, and are
-// served by Collection instead.
-type Resource interface {
-	// Name is the top-level key in settings.yml.
-	Name() string
+// Path is where a node sits in the API, built by walking down from the
+// repository and picking up the element names on the way.
+type Path struct {
+	repo     Repo
+	segments []string
+}
 
+// At returns the path of the repository itself.
+func At(repo Repo) Path { return Path{repo: repo} }
+
+// Child returns the path of a node below this one.
+func (p Path) Child(segment string) Path {
+	if segment == "" {
+		return p
+	}
+	return Path{repo: p.repo, segments: append(append([]string(nil), p.segments...), segment)}
+}
+
+// Element returns the path of one element of a collection.
+func (p Path) Element(name string) Path {
+	return Path{repo: p.repo, segments: append(append([]string(nil), p.segments...), escape(name))}
+}
+
+// String is the path as the API takes it.
+func (p Path) String() string {
+	path := fmt.Sprintf("repos/%s/%s", p.repo.Owner, p.repo.Name)
+	for _, segment := range p.segments {
+		path += "/" + segment
+	}
+	return path
+}
+
+// Object reads and writes the fields of one node directly.
+type Object interface {
 	// Fetch returns the current state as the API reports it.
-	Fetch(ctx context.Context, c Client, repo Repo) (map[string]any, error)
+	Fetch(ctx context.Context, c Client, node schema.Node, path Path) (map[string]any, error)
 
 	// Apply sends the declared fields. The whole declaration is sent rather
-	// than only the differing fields: the underlying request is idempotent, so
-	// there is nothing to gain from the more complicated option.
-	Apply(ctx context.Context, c Client, repo Repo, desired map[string]any) error
+	// than only the differing fields: the underlying requests are idempotent,
+	// so there is nothing to gain from the more complicated option.
+	Apply(ctx context.Context, c Client, node schema.Node, path Path, desired map[string]any) error
 }
 
-var registry = map[string]Resource{
-	"repository": Repository{},
-	"actions":    Actions{},
+// Collection reads and writes a set of named elements.
+//
+// Where an Object has one thing to write, a collection has elements that come
+// and go, so it needs create and delete alongside update.
+type Collection interface {
+	// FetchAll returns the current elements keyed by name.
+	//
+	// Elements are shaped like the body that creates one, so that comparing
+	// them with the declared elements is the same field-by-field comparison a
+	// plain node gets. Read-only fields the API reports are kept: Update and
+	// Delete may need them to address the element.
+	FetchAll(ctx context.Context, c Client, node schema.Node, path Path) (map[string]map[string]any, error)
+
+	// Create adds an element that GitHub does not have.
+	Create(ctx context.Context, c Client, node schema.Node, path Path, desired map[string]any) error
+
+	// Update sends the declared element in full.
+	//
+	// It receives the current element as well because a collection may address
+	// its elements by something GitHub issued rather than by name.
+	Update(ctx context.Context, c Client, node schema.Node, path Path, current, desired map[string]any) error
+
+	// Delete removes an element the settings file no longer declares. It takes
+	// the current element for the same reason Update does.
+	Delete(ctx context.Context, c Client, node schema.Node, path Path, current map[string]any) error
+
+	// ElementPath returns the path of one element, which is what the nodes
+	// below it hang off.
+	ElementPath(path Path, element map[string]any) (Path, error)
 }
 
-var collections = map[string]Collection{
-	"variables":    Variables{},
-	"rulesets":     Rulesets{},
-	"environments": Environments{},
-}
+// objects and collections hold the nodes that need something other than the
+// general behaviour, keyed by the path of keys leading to them in the settings
+// file.
+var (
+	objects = map[string]Object{}
 
-// Lookup returns the single-object resource registered under name.
-func Lookup(name string) (Resource, error) {
-	r, ok := registry[name]
-	if !ok {
-		return nil, fmt.Errorf("unknown resource %q (this build manages: %s)", name, joinNames())
+	collections = map[string]Collection{
+		"rulesets":     Rulesets{},
+		"environments": Environments{},
 	}
-	return r, nil
+)
+
+// ObjectFor returns how to read and write the fields of a node.
+func ObjectFor(key string) Object {
+	if special, ok := objects[key]; ok {
+		return special
+	}
+	return GenericObject{}
 }
 
-// LookupCollection returns the collection registered under name.
-func LookupCollection(name string) (Collection, error) {
-	c, ok := collections[name]
-	if !ok {
-		return nil, fmt.Errorf("unknown collection %q (this build manages: %s)", name, joinNames())
+// CollectionFor returns how to read and write the elements of a collection.
+func CollectionFor(key string) Collection {
+	if special, ok := collections[key]; ok {
+		return special
 	}
-	return c, nil
-}
-
-func joinNames() string {
-	names := make([]string, 0, len(registry)+len(collections))
-	for name := range registry {
-		names = append(names, name)
-	}
-	for name := range collections {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	return strings.Join(names, ", ")
+	return GenericCollection{}
 }

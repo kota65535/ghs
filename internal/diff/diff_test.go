@@ -1,10 +1,6 @@
 package diff
 
-import (
-	"bytes"
-	"strings"
-	"testing"
-)
+import "testing"
 
 func TestNormalizeMakesYAMLIntegersComparableToAPIValues(t *testing.T) {
 	// gopkg.in/yaml.v3 gives an int here while the API response gives a
@@ -14,7 +10,7 @@ func TestNormalizeMakesYAMLIntegersComparableToAPIValues(t *testing.T) {
 	current := map[string]any{"required_approving_review_count": float64(1)}
 
 	// The premise: comparing the two type shapes directly reports a change.
-	if got := Compute("rulesets", current, desired); len(got) != 1 {
+	if got := Compute(current, desired); len(got) != 1 {
 		t.Fatalf("got %d changes without normalization, want 1", len(got))
 	}
 
@@ -22,7 +18,7 @@ func TestNormalizeMakesYAMLIntegersComparableToAPIValues(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NormalizeMap: %v", err)
 	}
-	if changes := Compute("rulesets", current, normalized); len(changes) != 0 {
+	if changes := Compute(current, normalized); len(changes) != 0 {
 		t.Fatalf("got %d changes after normalization, want 0: %+v", len(changes), changes)
 	}
 }
@@ -35,7 +31,7 @@ func TestNormalizeKeepsNestedIntegers(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NormalizeMap: %v", err)
 	}
-	if changes := Compute("x", current, normalized); len(changes) != 0 {
+	if changes := Compute(current, normalized); len(changes) != 0 {
 		t.Fatalf("got %d changes, want 0: %+v", len(changes), changes)
 	}
 }
@@ -44,7 +40,7 @@ func TestComputeIgnoresFieldsNotDeclared(t *testing.T) {
 	current := map[string]any{"has_issues": true, "has_wiki": false}
 	desired := map[string]any{"has_issues": true}
 
-	if changes := Compute("repository", current, desired); len(changes) != 0 {
+	if changes := Compute(current, desired); len(changes) != 0 {
 		t.Fatalf("got %+v, want no changes for undeclared fields", changes)
 	}
 }
@@ -53,13 +49,13 @@ func TestComputeReportsChangedField(t *testing.T) {
 	current := map[string]any{"allow_auto_merge": false}
 	desired := map[string]any{"allow_auto_merge": true}
 
-	changes := Compute("repository", current, desired)
+	changes := Compute(current, desired)
 	if len(changes) != 1 {
 		t.Fatalf("got %d changes, want 1", len(changes))
 	}
 	c := changes[0]
-	if c.Path != "repository.allow_auto_merge" {
-		t.Errorf("Path = %q, want repository.allow_auto_merge", c.Path)
+	if c.Label != "allow_auto_merge" {
+		t.Errorf("Path = %q, want repository.allow_auto_merge", c.Label)
 	}
 	if c.Current != false || c.Desired != true {
 		t.Errorf("Current/Desired = %v/%v, want false/true", c.Current, c.Desired)
@@ -72,7 +68,7 @@ func TestComputeReportsChangedField(t *testing.T) {
 func TestComputeTreatsNullAsAValue(t *testing.T) {
 	// Declaring null means "clear this field", which is a change when GitHub
 	// reports a value and no change when it already reports null.
-	changes := Compute("repository", map[string]any{"homepage": "https://example.com"}, map[string]any{"homepage": nil})
+	changes := Compute(map[string]any{"homepage": "https://example.com"}, map[string]any{"homepage": nil})
 	if len(changes) != 1 {
 		t.Fatalf("got %d changes, want 1", len(changes))
 	}
@@ -80,13 +76,13 @@ func TestComputeTreatsNullAsAValue(t *testing.T) {
 		t.Errorf("Desired = %v, want nil", changes[0].Desired)
 	}
 
-	if changes := Compute("repository", map[string]any{"homepage": nil}, map[string]any{"homepage": nil}); len(changes) != 0 {
+	if changes := Compute(map[string]any{"homepage": nil}, map[string]any{"homepage": nil}); len(changes) != 0 {
 		t.Fatalf("got %+v, want no change when both are null", changes)
 	}
 }
 
 func TestComputeMarksFieldsAbsentFromResponse(t *testing.T) {
-	changes := Compute("repository", map[string]any{}, map[string]any{"web_commit_signoff_required": true})
+	changes := Compute(map[string]any{}, map[string]any{"web_commit_signoff_required": true})
 	if len(changes) != 1 {
 		t.Fatalf("got %d changes, want 1", len(changes))
 	}
@@ -111,13 +107,13 @@ func TestComputeRecursesIntoObjects(t *testing.T) {
 		},
 	}
 
-	changes := Compute("repository", current, desired)
+	changes := Compute(current, desired)
 	if len(changes) != 1 {
 		t.Fatalf("got %d changes, want 1: %+v", len(changes), changes)
 	}
-	want := "repository.security_and_analysis.secret_scanning.status"
-	if changes[0].Path != want {
-		t.Errorf("Path = %q, want %q", changes[0].Path, want)
+	want := "security_and_analysis.secret_scanning.status"
+	if changes[0].Label != want {
+		t.Errorf("Path = %q, want %q", changes[0].Label, want)
 	}
 }
 
@@ -128,32 +124,32 @@ func TestComputeReportsLeavesWhenParentObjectIsAbsent(t *testing.T) {
 		},
 	}
 
-	changes := Compute("repository", map[string]any{}, desired)
+	changes := Compute(map[string]any{}, desired)
 	if len(changes) != 1 {
 		t.Fatalf("got %d changes, want 1: %+v", len(changes), changes)
 	}
 	if !changes[0].CurrentMissing {
 		t.Error("CurrentMissing = false, want true")
 	}
-	if changes[0].Path != "repository.security_and_analysis.secret_scanning.status" {
-		t.Errorf("Path = %q, want the leaf path", changes[0].Path)
+	if changes[0].Label != "security_and_analysis.secret_scanning.status" {
+		t.Errorf("Path = %q, want the leaf path", changes[0].Label)
 	}
 }
 
 func TestComputeComparesArraysIncludingOrder(t *testing.T) {
 	current := map[string]any{"items": []any{"a", "b"}}
 
-	if changes := Compute("x", current, map[string]any{"items": []any{"a", "b"}}); len(changes) != 0 {
+	if changes := Compute(current, map[string]any{"items": []any{"a", "b"}}); len(changes) != 0 {
 		t.Fatalf("got %+v, want no change for identical arrays", changes)
 	}
 	// Reordering is a change: elements are paired by index, so both positions
 	// are reported.
-	changes := Compute("x", current, map[string]any{"items": []any{"b", "a"}})
+	changes := Compute(current, map[string]any{"items": []any{"b", "a"}})
 	if len(changes) != 2 {
 		t.Fatalf("got %d changes, want 2 for a reordered array: %+v", len(changes), changes)
 	}
-	if changes[0].Path != "x.items[0]" || changes[1].Path != "x.items[1]" {
-		t.Errorf("paths = %q, %q, want x.items[0], x.items[1]", changes[0].Path, changes[1].Path)
+	if changes[0].Label != "items[0]" || changes[1].Label != "items[1]" {
+		t.Errorf("paths = %q, %q, want x.items[0], x.items[1]", changes[0].Label, changes[1].Label)
 	}
 }
 
@@ -182,7 +178,7 @@ func TestComputeIgnoresServerDefaultsInsideArrayElements(t *testing.T) {
 		},
 	}
 
-	if changes := Compute("rulesets", current, desired); len(changes) != 0 {
+	if changes := Compute(current, desired); len(changes) != 0 {
 		t.Fatalf("got %+v, want no change when only undeclared defaults differ", changes)
 	}
 }
@@ -199,13 +195,13 @@ func TestComputeReportsTheDifferingFieldInsideAnArrayElement(t *testing.T) {
 		},
 	}
 
-	changes := Compute("rulesets", current, desired)
+	changes := Compute(current, desired)
 	if len(changes) != 1 {
 		t.Fatalf("got %d changes, want 1: %+v", len(changes), changes)
 	}
-	want := "rulesets.rules[0].parameters.required_approving_review_count"
-	if changes[0].Path != want {
-		t.Errorf("Path = %q, want %q", changes[0].Path, want)
+	want := "rules[0].parameters.required_approving_review_count"
+	if changes[0].Label != want {
+		t.Errorf("Path = %q, want %q", changes[0].Label, want)
 	}
 }
 
@@ -216,21 +212,21 @@ func TestComputeReportsPositionsPastTheEndOfAnArray(t *testing.T) {
 		map[string]any{"type": "non_fast_forward"},
 	}}
 
-	changes := Compute("rulesets", current, desired)
+	changes := Compute(current, desired)
 	if len(changes) != 1 {
 		t.Fatalf("got %d changes, want 1: %+v", len(changes), changes)
 	}
 
 	c := changes[0]
-	if c.Path != "rulesets.rules[1]" {
-		t.Errorf("Path = %q, want the position being added", c.Path)
+	if c.Label != "rules[1]" {
+		t.Errorf("Path = %q, want the position being added", c.Label)
 	}
 	if !c.CurrentMissing {
 		t.Error("CurrentMissing = false, want true for a position the array does not reach")
 	}
 
 	// The other way round, a position the declaration does not reach is going.
-	changes = Compute("rulesets", desired, current)
+	changes = Compute(desired, current)
 	if len(changes) != 1 {
 		t.Fatalf("got %d changes, want 1: %+v", len(changes), changes)
 	}
@@ -267,12 +263,12 @@ func TestComputeIgnoresServerDefaultsEvenWhenAnArrayChangesLength(t *testing.T) 
 		},
 	}
 
-	changes := Compute("rulesets", current, desired)
+	changes := Compute(current, desired)
 	if len(changes) != 1 {
 		t.Fatalf("got %d changes, want only the dropped entry: %+v", len(changes), changes)
 	}
-	if changes[0].Path != "rulesets.rules[1]" {
-		t.Errorf("Path = %q, want only rulesets.rules[1] reported", changes[0].Path)
+	if changes[0].Label != "rules[1]" {
+		t.Errorf("Path = %q, want only rulesets.rules[1] reported", changes[0].Label)
 	}
 }
 
@@ -280,12 +276,12 @@ func TestComputeComparesScalarArrayElementsWholly(t *testing.T) {
 	current := map[string]any{"include": []any{"~DEFAULT_BRANCH", "refs/heads/release/*"}}
 	desired := map[string]any{"include": []any{"~DEFAULT_BRANCH", "refs/heads/main"}}
 
-	changes := Compute("rulesets", current, desired)
+	changes := Compute(current, desired)
 	if len(changes) != 1 {
 		t.Fatalf("got %d changes, want 1: %+v", len(changes), changes)
 	}
-	if changes[0].Path != "rulesets.include[1]" {
-		t.Errorf("Path = %q, want rulesets.include[1]", changes[0].Path)
+	if changes[0].Label != "include[1]" {
+		t.Errorf("Path = %q, want rulesets.include[1]", changes[0].Label)
 	}
 }
 
@@ -295,12 +291,12 @@ func TestComputeReportsArrayElementAgainstAMismatchedType(t *testing.T) {
 	current := map[string]any{"rules": []any{"pull_request"}}
 	desired := map[string]any{"rules": []any{map[string]any{"type": "pull_request"}}}
 
-	changes := Compute("rulesets", current, desired)
+	changes := Compute(current, desired)
 	if len(changes) != 1 {
 		t.Fatalf("got %d changes, want 1: %+v", len(changes), changes)
 	}
-	if changes[0].Path != "rulesets.rules[0]" {
-		t.Errorf("Path = %q, want rulesets.rules[0]", changes[0].Path)
+	if changes[0].Label != "rules[0]" {
+		t.Errorf("Path = %q, want rulesets.rules[0]", changes[0].Label)
 	}
 }
 
@@ -308,93 +304,15 @@ func TestComputeSortsChangesByPath(t *testing.T) {
 	current := map[string]any{"z": false, "a": false, "m": false}
 	desired := map[string]any{"z": true, "a": true, "m": true}
 
-	changes := Compute("repository", current, desired)
+	changes := Compute(current, desired)
 	var paths []string
 	for _, c := range changes {
-		paths = append(paths, c.Path)
+		paths = append(paths, c.Label)
 	}
-	want := []string{"repository.a", "repository.m", "repository.z"}
+	want := []string{"a", "m", "z"}
 	for i := range want {
 		if paths[i] != want[i] {
 			t.Fatalf("paths = %v, want %v", paths, want)
 		}
-	}
-}
-
-func TestRenderText(t *testing.T) {
-	changes := []Change{
-		{Path: "repository.allow_auto_merge", Current: false, Desired: true},
-		{Path: "repository.homepage", Current: "https://example.com", Desired: nil},
-	}
-
-	var buf bytes.Buffer
-	if err := Render(&buf, changes, FormatText); err != nil {
-		t.Fatalf("Render: %v", err)
-	}
-
-	// Two fields of one resource are one object to change.
-	want := strings.Join([]string{
-		"~ repository:",
-		"    ~ allow_auto_merge: false -> true",
-		`    ~ homepage:         "https://example.com" -> null`,
-		"",
-		"Plan: 1 to change.",
-		"",
-	}, "\n")
-	if buf.String() != want {
-		t.Errorf("output =\n%s\nwant\n%s", buf.String(), want)
-	}
-}
-
-func TestRenderTextNoChanges(t *testing.T) {
-	var buf bytes.Buffer
-	if err := Render(&buf, nil, FormatText); err != nil {
-		t.Fatalf("Render: %v", err)
-	}
-	if !strings.Contains(buf.String(), "No changes") {
-		t.Errorf("output = %q, want a no-changes message", buf.String())
-	}
-}
-
-func TestRenderMarkdown(t *testing.T) {
-	changes := []Change{{Path: "repository.has_wiki", Current: true, Desired: false}}
-
-	var buf bytes.Buffer
-	if err := Render(&buf, changes, FormatMarkdown); err != nil {
-		t.Fatalf("Render: %v", err)
-	}
-	out := buf.String()
-
-	for _, want := range []string{"### ghs plan", "| Action | Path | Current | Desired |", "| update | `repository.has_wiki` | `true` | `false` |", "**Plan: 1 to change.**"} {
-		if !strings.Contains(out, want) {
-			t.Errorf("output missing %q:\n%s", want, out)
-		}
-	}
-}
-
-func TestRenderJSON(t *testing.T) {
-	changes := []Change{{Path: "repository.has_wiki", Desired: false, CurrentMissing: true}}
-
-	var buf bytes.Buffer
-	if err := Render(&buf, changes, FormatJSON); err != nil {
-		t.Fatalf("Render: %v", err)
-	}
-	out := buf.String()
-
-	for _, want := range []string{`"path": "repository.has_wiki"`, `"current_missing": true`, `"changed": 1`} {
-		if !strings.Contains(out, want) {
-			t.Errorf("output missing %q:\n%s", want, out)
-		}
-	}
-}
-
-func TestParseFormat(t *testing.T) {
-	for _, s := range []string{"text", "markdown", "json"} {
-		if _, err := ParseFormat(s); err != nil {
-			t.Errorf("ParseFormat(%q) failed: %v", s, err)
-		}
-	}
-	if _, err := ParseFormat("yaml"); err == nil {
-		t.Error("ParseFormat(\"yaml\") succeeded, want an error")
 	}
 }

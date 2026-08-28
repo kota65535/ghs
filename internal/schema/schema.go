@@ -1,14 +1,26 @@
-// Package schema holds the field definitions that describe which fields of a
-// GitHub REST API resource ghs is allowed to manage.
+// Package schema describes the shape of settings.yml: which keys it accepts,
+// what may go under each of them, and which API operation writes what.
 //
-// The definitions in fields_gen.go are generated from the official GitHub
+// The description in nodes_gen.go is generated from the official GitHub
 // OpenAPI description (github/rest-api-description) by `go generate ./gen`.
-// Nothing in this package is hand-maintained except the deny lists below.
+// Nothing in this package is hand-maintained except the patches in extra.go.
+//
+// The file is a tree that follows the API's own paths. Its root is the
+// repository -- `PATCH /repos/{owner}/{repo}` -- so the fields of that request
+// are written at the top level, and everything reached through a longer path
+// goes under a key named after it:
+//
+//	has_issues: true              # a field of the repository itself
+//	actions:                      # /repos/{owner}/{repo}/actions
+//	  permissions:                # .../actions/permissions
+//	    enabled: true
+//	    workflow:                 # .../actions/permissions/workflow
+//	      default_workflow_permissions: read
 package schema
 
 import "sort"
 
-// Field describes a single writable field of a resource.
+// Field describes a single writable field.
 type Field struct {
 	// Type is the JSON type declared by the OpenAPI description
 	// ("string", "boolean", "integer", "number", "object", "array").
@@ -26,22 +38,9 @@ type Field struct {
 	// unspecified (a free-form object), in which case the nested content is
 	// passed through without validation.
 	Fields map[string]Field
-
-	// Elements describes one entry of a collection nested inside this field.
-	//
-	// A list belonging to a resource is sometimes reached through an API of
-	// its own -- the variables of an environment are written one at a time --
-	// without thereby ceasing to be a field of that resource. Such a field is
-	// declared like any other list and the entries are matched by name, the
-	// same as a top-level collection. It is nil for every other field.
-	Elements map[string]Field
 }
 
-// IsCollection reports whether the field is a collection of named entries
-// rather than a plain value.
-func (f Field) IsCollection() bool { return f.Elements != nil }
-
-// Kind is the shape a resource takes in settings.yml.
+// Kind is the shape a node takes in settings.yml.
 type Kind string
 
 const (
@@ -51,56 +50,84 @@ const (
 	// KindCollection is a set of named elements, declared as a sequence of
 	// them. Its fields describe one element rather than the whole set.
 	KindCollection Kind = "collection"
+
+	// KindNamespace is a key that stands for a path segment and holds no
+	// fields of its own. GitHub has nothing at /repos/{owner}/{repo}/actions,
+	// but the settings below it are reached through that segment.
+	KindNamespace Kind = "namespace"
 )
 
-// Resource describes one manageable API resource, such as "repository".
-type Resource struct {
-	// Name is the top-level key used in settings.yml.
-	Name string
-
-	// Kind is how the resource is written in the settings file.
+// Node is one key of settings.yml, and everything that may be written under
+// it.
+type Node struct {
+	// Kind is how the node is written.
 	Kind Kind
 
-	// Fields are the writable fields taken from the API request body schema.
-	// For a collection they are the fields of one element, taken from the
-	// request body that creates it.
+	// Segment is both the key this node is written under and what it adds to
+	// its parent's API path. Those are the same thing: a key names the path
+	// segment it stands for, which is what makes the endpoint that changes a
+	// setting tell you where to write it.
+	//
+	// It is empty for the root, whose path is the repository itself and whose
+	// fields are the top level of the file.
+	//
+	// A path is built by walking down from the root, which is how the element
+	// names of a collection get into it: the variables of an environment are
+	// at environments/{name}/variables, and the {name} comes from the element
+	// the walk is passing through.
+	Segment string
+
+	// Method writes this node's fields. It is empty for a namespace, which has
+	// no operation of its own.
+	Method string
+
+	// Conditional marks a node whose API path exists only in some
+	// repositories: the allowed actions are there only while the policy is to
+	// select them, and some settings are for private repositories alone.
+	//
+	// Where such a path does not apply, the current state simply lacks those
+	// fields, and a declaration of one reads as a change against nothing.
+	Conditional bool
+
+	// Fields are the writable fields of this node, taken from the request body
+	// of its operation. For a collection they describe one element.
 	Fields map[string]Field
+
+	// Nodes are the keys that may appear under this one, named after the path
+	// segment each stands for.
+	Nodes map[string]Node
 }
 
-// IsCollection reports whether the resource is a set of named elements.
-func (r Resource) IsCollection() bool { return r.Kind == KindCollection }
+// IsCollection reports whether the node is a set of named elements.
+func (n Node) IsCollection() bool { return n.Kind == KindCollection }
 
-// NestedCollections names the fields of this resource that are collections of
-// their own, in sorted order.
-func (r Resource) NestedCollections() []string {
-	var names []string
-	for name, field := range r.Fields {
-		if field.IsCollection() {
-			names = append(names, name)
-		}
-	}
-	sort.Strings(names)
-	return names
-}
+// IsNamespace reports whether the node only groups the nodes beneath it.
+func (n Node) IsNamespace() bool { return n.Kind == KindNamespace }
 
-// Get returns the definition of a top-level field.
-func (r Resource) Get(name string) (Field, bool) {
-	f, ok := r.Fields[name]
+// Writable reports whether the node has an operation that writes its fields.
+func (n Node) Writable() bool { return n.Method != "" }
+
+// Field returns the definition of one of the node's own fields.
+func (n Node) Field(name string) (Field, bool) {
+	f, ok := n.Fields[name]
 	return f, ok
 }
 
-// Lookup returns the resource registered under name.
-func Lookup(name string) (Resource, bool) {
-	r, ok := resources[name]
-	return r, ok
+// Child returns the node written under name.
+func (n Node) Child(name string) (Node, bool) {
+	child, ok := n.Nodes[name]
+	return child, ok
 }
 
-// Names returns the registered resource names in sorted order.
-func Names() []string {
-	names := make([]string, 0, len(resources))
-	for name := range resources {
+// ChildNames returns the keys that may appear under this node, sorted.
+func (n Node) ChildNames() []string {
+	names := make([]string, 0, len(n.Nodes))
+	for name := range n.Nodes {
 		names = append(names, name)
 	}
 	sort.Strings(names)
 	return names
 }
+
+// Root is the repository, which is what a settings file describes.
+func Root() Node { return root }

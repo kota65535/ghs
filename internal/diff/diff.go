@@ -25,13 +25,14 @@ const (
 	ActionDelete Action = "delete"
 )
 
-// Change is a single difference between the declared settings and the current
-// ones: either a field whose value differs, or a collection element to create
-// or delete.
+// Change is a single field whose declared value differs from the current one.
 type Change struct {
-	// Path is the location of the change, such as
-	// "repository.allow_auto_merge" or `rulesets["protect-main"].enforcement`.
-	Path string
+	// Label names the field within the node it belongs to, such as
+	// "allow_auto_merge" or "rules[0].parameters.required_approving_review_count".
+	//
+	// Where in the settings file that node sits is the plan's business, not the
+	// change's.
+	Label string
 
 	// Current is the value GitHub reports. It is nil when CurrentMissing is
 	// true, which is not the same as GitHub reporting null. For a delete it is
@@ -56,34 +57,9 @@ type Change struct {
 	// where it ends today. It is not what an undeclared field looks like:
 	// those are simply not managed and never become changes at all.
 	DesiredMissing bool
-
-	// Action is what apply does about this change.
-	Action Action
-
-	// Element names the collection element this change belongs to. It is empty
-	// for a single-object resource, which has no elements.
-	Element string
-
-	// Nested names the field of that element holding a collection of its own,
-	// and Entry the entry within it, when the change is about one. Both are
-	// empty otherwise.
-	//
-	// The path says as much, but only by spelling it out; keeping the parts
-	// means the report does not have to read its own paths back.
-	Nested string
-	Entry  string
 }
 
-// action is Action with the zero value read as ActionUpdate, so that a change
-// built without naming one still reports what it does.
-func (c Change) action() Action {
-	if c.Action == "" {
-		return ActionUpdate
-	}
-	return c.Action
-}
-
-// Normalize converts a value decoded from YAML into the type shape
+// normalize converts a value decoded from YAML into the type shape
 // encoding/json produces, so that declared and current values can be compared
 // directly.
 //
@@ -91,7 +67,7 @@ func (c Change) action() Action {
 // decodes 1 as int while encoding/json decodes the same 1 as float64, which
 // makes a plan report a change that apply cannot resolve — a diff that never
 // goes away no matter how often it is applied.
-func Normalize(v any) (any, error) {
+func normalize(v any) (any, error) {
 	b, err := json.Marshal(v)
 	if err != nil {
 		return nil, fmt.Errorf("normalize: %w", err)
@@ -105,7 +81,7 @@ func Normalize(v any) (any, error) {
 
 // NormalizeMap is Normalize for an object.
 func NormalizeMap(v map[string]any) (map[string]any, error) {
-	normalized, err := Normalize(v)
+	normalized, err := normalize(v)
 	if err != nil {
 		return nil, err
 	}
@@ -121,12 +97,15 @@ func NormalizeMap(v map[string]any) (map[string]any, error) {
 
 // Compute returns the changes needed to bring current in line with desired.
 //
-// Only keys present in desired are examined; everything else about the
-// resource is left alone. Both arguments are expected to be normalized.
-func Compute(prefix string, current, desired map[string]any) []Change {
+// Only keys present in desired are examined; everything else about the node is
+// left alone. Both arguments are expected to be normalized.
+//
+// The labels are relative to the node being compared. Where that node sits in
+// the settings file is recorded by the plan the changes go into.
+func Compute(current, desired map[string]any) []Change {
 	var changes []Change
-	walk(prefix, current, desired, &changes)
-	sort.Slice(changes, func(i, j int) bool { return changes[i].Path < changes[j].Path })
+	walk("", current, desired, &changes)
+	sort.Slice(changes, func(i, j int) bool { return changes[i].Label < changes[j].Label })
 	return changes
 }
 
@@ -187,18 +166,16 @@ func compare(path string, currentValue, desiredValue any, present bool, changes 
 			}
 			for i := shared; i < len(desiredArray); i++ {
 				*changes = append(*changes, Change{
-					Path:           fmt.Sprintf("%s[%d]", path, i),
+					Label:          fmt.Sprintf("%s[%d]", path, i),
 					Desired:        desiredArray[i],
 					CurrentMissing: true,
-					Action:         ActionUpdate,
 				})
 			}
 			for i := shared; i < len(currentArray); i++ {
 				*changes = append(*changes, Change{
-					Path:           fmt.Sprintf("%s[%d]", path, i),
+					Label:          fmt.Sprintf("%s[%d]", path, i),
 					Current:        currentArray[i],
 					DesiredMissing: true,
-					Action:         ActionUpdate,
 				})
 			}
 			return
@@ -207,10 +184,9 @@ func compare(path string, currentValue, desiredValue any, present bool, changes 
 
 	if !present {
 		*changes = append(*changes, Change{
-			Path:           path,
+			Label:          path,
 			Desired:        desiredValue,
 			CurrentMissing: true,
-			Action:         ActionUpdate,
 		})
 		return
 	}
@@ -220,9 +196,8 @@ func compare(path string, currentValue, desiredValue any, present bool, changes 
 	}
 
 	*changes = append(*changes, Change{
-		Path:    path,
+		Label:   path,
 		Current: currentValue,
 		Desired: desiredValue,
-		Action:  ActionUpdate,
 	})
 }

@@ -25,86 +25,53 @@ import (
 	"time"
 )
 
-// operation identifies the API operation whose request body defines the
-// writable fields of a resource.
+// operation is one node of settings.yml and the API operation that writes its
+// fields.
 type operation struct {
-	resource string // top-level key in settings.yml
-	path     string // OpenAPI path
-	method   string // OpenAPI method
-	kind     string // schema.Kind constant the resource is generated with
+	// key is where the node is written, as the keys leading down to it from
+	// the top level of the file. It is empty for the root, whose fields are
+	// the top level itself.
+	//
+	// The keys follow the API's own path, so that finding where a setting goes
+	// is a matter of reading the endpoint that changes it.
+	key []string
+
+	path   string // OpenAPI path
+	method string // OpenAPI method
+	kind   string // schema.Kind constant the node is generated with
+
+	// conditional marks a path that exists only in some repositories.
+	conditional bool
 }
 
-// operations lists every resource ghs generates field definitions for.
-// Adding a resource means adding a line here.
+// operations lists every node ghs generates a description for. Adding a
+// setting means adding a line here.
 //
 // A collection is generated from the operation that creates one element,
 // because that request body is the list of fields an element may declare.
 //
-// Several lines may name the same resource, whose fields are then the union of
-// what those operations accept. GitHub spreads a repository's Actions settings
-// over a handful of endpoints, but they are one thing to declare.
+// Nodes that only stand for a path segment are not listed: they are implied by
+// the keys of the nodes below them. GitHub has nothing at
+// /repos/{owner}/{repo}/actions, but its permissions and variables are reached
+// through it.
 var operations = []operation{
-	{resource: "repository", path: "/repos/{owner}/{repo}", method: "patch", kind: "KindObject"},
-	{resource: "variables", path: "/repos/{owner}/{repo}/actions/variables", method: "post", kind: "KindCollection"},
-	{resource: "rulesets", path: "/repos/{owner}/{repo}/rulesets", method: "post", kind: "KindCollection"},
-	{resource: "environments", path: "/repos/{owner}/{repo}/environments/{environment_name}", method: "put", kind: "KindCollection"},
+	{key: nil, path: "/repos/{owner}/{repo}", method: "patch", kind: "KindObject"},
 
-	// The retention endpoint is left out: its only field is named "days",
-	// which says nothing about what it counts once it sits among the fields
-	// below. Writing the API's own names only works while those names carry
-	// their meaning with them.
-	{resource: "actions", path: "/repos/{owner}/{repo}/actions/permissions", method: "put", kind: "KindObject"},
-	{resource: "actions", path: "/repos/{owner}/{repo}/actions/permissions/workflow", method: "put", kind: "KindObject"},
-	{resource: "actions", path: "/repos/{owner}/{repo}/actions/permissions/selected-actions", method: "put", kind: "KindObject"},
-	{resource: "actions", path: "/repos/{owner}/{repo}/actions/permissions/fork-pr-contributor-approval", method: "put", kind: "KindObject"},
-}
+	{key: []string{"rulesets"}, path: "/repos/{owner}/{repo}/rulesets", method: "post", kind: "KindCollection"},
+	{key: []string{"environments"}, path: "/repos/{owner}/{repo}/environments/{environment_name}", method: "put", kind: "KindCollection"},
+	{key: []string{"environments", "variables"}, path: "/repos/{owner}/{repo}/environments/{environment_name}/variables", method: "post", kind: "KindCollection"},
 
-// resourceNames returns the resources to generate, in the order they are first
-// named above, so that regenerating produces the same file.
-func resourceNames() []string {
-	var names []string
-	seen := map[string]bool{}
-	for _, op := range operations {
-		if seen[op.resource] {
-			continue
-		}
-		seen[op.resource] = true
-		names = append(names, op.resource)
-	}
-	for _, nested := range nestedOperations {
-		if !seen[nested.parent] {
-			names = append(names, nested.parent)
-			seen[nested.parent] = true
-		}
-	}
-	return names
-}
-
-// nestedOperation identifies the operation that creates one entry of a
-// collection belonging to another resource.
-//
-// A list a resource owns is sometimes written one entry at a time through an
-// API of its own. That is a choice about how the list is updated, not about
-// whether it belongs to the resource, so the entries are declared as a field
-// of it and generated from the body that creates one.
-type nestedOperation struct {
-	parent string // top-level key whose elements hold the collection
-	field  string // key the collection takes within an element
-	path   string
-	method string
-}
-
-var nestedOperations = []nestedOperation{
-	{
-		parent: "environments", field: "variables",
-		path:   "/repos/{owner}/{repo}/environments/{environment_name}/variables",
-		method: "post",
-	},
+	{key: []string{"actions", "variables"}, path: "/repos/{owner}/{repo}/actions/variables", method: "post", kind: "KindCollection"},
+	{key: []string{"actions", "permissions"}, path: "/repos/{owner}/{repo}/actions/permissions", method: "put", kind: "KindObject"},
+	{key: []string{"actions", "permissions", "workflow"}, path: "/repos/{owner}/{repo}/actions/permissions/workflow", method: "put", kind: "KindObject"},
+	{key: []string{"actions", "permissions", "fork-pr-contributor-approval"}, path: "/repos/{owner}/{repo}/actions/permissions/fork-pr-contributor-approval", method: "put", kind: "KindObject"},
+	{key: []string{"actions", "permissions", "selected-actions"}, path: "/repos/{owner}/{repo}/actions/permissions/selected-actions", method: "put", kind: "KindObject", conditional: true},
+	{key: []string{"actions", "permissions", "artifact-and-log-retention"}, path: "/repos/{owner}/{repo}/actions/permissions/artifact-and-log-retention", method: "put", kind: "KindObject"},
 }
 
 const (
 	refFile = "gen/openapi.ref"
-	outFile = "internal/schema/fields_gen.go"
+	outFile = "internal/schema/nodes_gen.go"
 	specURL = "https://raw.githubusercontent.com/github/rest-api-description/%s/descriptions/api.github.com/api.github.com.json"
 )
 
@@ -213,13 +180,44 @@ func loadSpec(ref string) (map[string]any, error) {
 
 // field mirrors schema.Field during generation.
 type field struct {
-	Type     string
-	Enum     []string
-	Fields   map[string]field
-	Elements map[string]field
+	Type   string
+	Enum   []string
+	Fields map[string]field
+}
+
+// node mirrors schema.Node during generation.
+type node struct {
+	kind        string
+	segment     string
+	method      string
+	conditional bool
+	from        string // the operation it was generated from, for a comment
+
+	fields map[string]field
+	nodes  map[string]*node
+}
+
+// child returns the node written under name, adding it as a namespace if this
+// is the first time it is reached. A namespace is what a path segment with no
+// operation of its own amounts to.
+func (n *node) child(name string) *node {
+	if n.nodes == nil {
+		n.nodes = map[string]*node{}
+	}
+	if existing, ok := n.nodes[name]; ok {
+		return existing
+	}
+	created := &node{kind: "KindNamespace", segment: name}
+	n.nodes[name] = created
+	return created
 }
 
 func generate(spec map[string]any, ref string) ([]byte, error) {
+	root, err := buildTree(spec)
+	if err != nil {
+		return nil, err
+	}
+
 	var b strings.Builder
 
 	fmt.Fprintf(&b, "// Code generated by `go run ./gen`. DO NOT EDIT.\n")
@@ -229,70 +227,130 @@ func generate(spec map[string]any, ref string) ([]byte, error) {
 	// A package path rather than a relative one: go generate runs the command
 	// from the directory of the file it appears in.
 	fmt.Fprintf(&b, "//go:generate go run github.com/kota65535/ghs/gen\n\n")
-	fmt.Fprintf(&b, "// generated holds the field definitions exactly as the description states\n")
-	fmt.Fprintf(&b, "// them. See extra.go for the fields it is missing.\n")
-	fmt.Fprintf(&b, "var generated = map[string]Resource{\n")
-
-	c := converter{spec: spec}
-	for _, resource := range resourceNames() {
-		var (
-			fields = map[string]field{}
-			kind   string
-			from   []string
-		)
-
-		// A resource whose state is spread over several endpoints is put back
-		// together here: the settings file describes the resource, not the
-		// requests it takes to write one.
-		for _, op := range operations {
-			if op.resource != resource {
-				continue
-			}
-			props, err := requestProperties(spec, op)
-			if err != nil {
-				return nil, err
-			}
-			for name, f := range c.properties(props, nil) {
-				if _, taken := fields[name]; taken {
-					return nil, fmt.Errorf("%s: %s is described by more than one operation", resource, name)
-				}
-				fields[name] = f
-			}
-			kind = op.kind
-			from = append(from, fmt.Sprintf("%s %s", strings.ToUpper(op.method), op.path))
-		}
-
-		for _, nested := range nestedOperations {
-			if nested.parent != resource {
-				continue
-			}
-			entry, err := requestProperties(spec, operation{path: nested.path, method: nested.method})
-			if err != nil {
-				return nil, err
-			}
-			fields[nested.field] = field{Type: "array", Elements: c.properties(entry, nil)}
-			from = append(from, fmt.Sprintf("%s %s", strings.ToUpper(nested.method), nested.path))
-		}
-
-		fmt.Fprintf(&b, "\t%q: {\n", resource)
-		fmt.Fprintf(&b, "\t\tName: %q,\n", resource)
-		fmt.Fprintf(&b, "\t\tKind: %s,\n", kind)
-		for _, source := range from {
-			fmt.Fprintf(&b, "\t\t// from %s\n", source)
-		}
-		fmt.Fprintf(&b, "\t\tFields: ")
-		writeFields(&b, fields, 2)
-		fmt.Fprintf(&b, ",\n")
-		fmt.Fprintf(&b, "\t},\n")
-	}
-
-	fmt.Fprintf(&b, "}\n")
+	fmt.Fprintf(&b, "// generated describes the settings file exactly as the API description\n")
+	fmt.Fprintf(&b, "// states it. See extra.go for what it is missing.\n")
+	fmt.Fprintf(&b, "var generated = ")
+	writeNode(&b, root, 0)
+	fmt.Fprintf(&b, "\n")
 
 	src, err := format.Source([]byte(b.String()))
 	if err != nil {
 		return nil, fmt.Errorf("format generated source: %w", err)
 	}
 	return src, nil
+}
+
+// buildTree places every operation at the key it is written under, creating the
+// namespaces the keys pass through.
+func buildTree(spec map[string]any) (*node, error) {
+	c := converter{spec: spec}
+	root := &node{}
+
+	for _, op := range operations {
+		target := root
+		for _, key := range op.key {
+			target = target.child(key)
+		}
+
+		if target.method != "" {
+			return nil, fmt.Errorf("%s: two operations write the same node", strings.Join(op.key, "."))
+		}
+
+		props, err := requestProperties(spec, op)
+		if err != nil {
+			return nil, err
+		}
+
+		target.kind = op.kind
+		target.method = strings.ToUpper(op.method)
+		target.conditional = op.conditional
+		target.fields = c.properties(props, nil)
+		target.from = fmt.Sprintf("%s %s", strings.ToUpper(op.method), op.path)
+		// The root is where paths are measured from, so it adds nothing to
+		// one.
+		if len(op.key) > 0 {
+			target.segment = lastSegment(op.path)
+		}
+	}
+
+	if err := checkCollisions(root, ""); err != nil {
+		return nil, err
+	}
+	return root, nil
+}
+
+// lastSegment is what an operation's path adds under its parent's, which is
+// its final segment unless that segment only names an element of a collection.
+//
+// Creating an environment is a PUT on environments/{environment_name}, and
+// what the node adds to the path is "environments": the name comes from the
+// element being written, not from the description.
+func lastSegment(path string) string {
+	parts := strings.Split(strings.Trim(path, "/"), "/")
+	for i := len(parts) - 1; i >= 0; i-- {
+		if !strings.HasPrefix(parts[i], "{") {
+			return parts[i]
+		}
+	}
+	return ""
+}
+
+// checkCollisions rejects a node whose own field is named the same as one of
+// the keys below it, which would leave no way to tell them apart in the file.
+func checkCollisions(n *node, where string) error {
+	for name := range n.nodes {
+		if _, taken := n.fields[name]; taken {
+			return fmt.Errorf("%s%s is both a field and a key of its own", where, name)
+		}
+	}
+	for name, child := range n.nodes {
+		if err := checkCollisions(child, where+name+"."); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func writeNode(b *strings.Builder, n *node, depth int) {
+	indent := strings.Repeat("\t", depth)
+
+	fmt.Fprintf(b, "Node{\n")
+	fmt.Fprintf(b, "%s\tKind: %s,\n", indent, n.kind)
+	if n.segment != "" {
+		fmt.Fprintf(b, "%s\tSegment: %q,\n", indent, n.segment)
+	}
+	if n.method != "" {
+		fmt.Fprintf(b, "%s\tMethod: %q,\n", indent, n.method)
+	}
+	if n.conditional {
+		fmt.Fprintf(b, "%s\tConditional: true,\n", indent)
+	}
+
+	if len(n.fields) > 0 {
+		if n.from != "" {
+			fmt.Fprintf(b, "%s\t// from %s\n", indent, n.from)
+		}
+		fmt.Fprintf(b, "%s\tFields: ", indent)
+		writeFields(b, n.fields, depth+1)
+		fmt.Fprintf(b, ",\n")
+	}
+
+	if len(n.nodes) > 0 {
+		fmt.Fprintf(b, "%s\tNodes: map[string]Node{\n", indent)
+		names := make([]string, 0, len(n.nodes))
+		for name := range n.nodes {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		for _, name := range names {
+			fmt.Fprintf(b, "%s\t\t%q: ", indent, name)
+			writeNode(b, n.nodes[name], depth+2)
+			fmt.Fprintf(b, ",\n")
+		}
+		fmt.Fprintf(b, "%s\t},\n", indent)
+	}
+
+	fmt.Fprintf(b, "%s}", indent)
 }
 
 // requestProperties returns the properties of the operation's JSON request
@@ -469,16 +527,8 @@ func writeFields(b *strings.Builder, fields map[string]field, depth int) {
 			if len(parts) > 0 {
 				fmt.Fprintf(b, ", ")
 			}
-			parts = append(parts, "")
 			fmt.Fprintf(b, "Fields: ")
 			writeFields(b, f.Fields, depth+2)
-		}
-		if len(f.Elements) > 0 {
-			if len(parts) > 0 {
-				fmt.Fprintf(b, ", ")
-			}
-			fmt.Fprintf(b, "Elements: ")
-			writeFields(b, f.Elements, depth+2)
 		}
 		fmt.Fprintf(b, "},\n")
 	}

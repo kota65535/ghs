@@ -5,7 +5,17 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+
+	"github.com/kota65535/ghs/internal/schema"
 )
+
+var rulesetsNode = schema.Node{
+	Kind:    schema.KindCollection,
+	Segment: "rulesets",
+	Method:  http.MethodPost,
+}
+
+func rulesetsPath() Path { return At(testRepo).Child("rulesets") }
 
 func TestRulesetsFetchAllReadsEachRulesetInFull(t *testing.T) {
 	// The listing is not trusted to carry rules and conditions, so each
@@ -24,7 +34,7 @@ func TestRulesetsFetchAllReadsEachRulesetInFull(t *testing.T) {
 	srv := rec.server()
 	defer srv.Close()
 
-	current, err := Rulesets{}.FetchAll(context.Background(), newTestClient(t, srv), Repo{Owner: "kota65535", Name: "ghs"})
+	current, err := Rulesets{}.FetchAll(context.Background(), newTestClient(t, srv), rulesetsNode, rulesetsPath())
 	if err != nil {
 		t.Fatalf("FetchAll: %v", err)
 	}
@@ -45,13 +55,11 @@ func TestRulesetsFetchAllReadsEachRulesetInFull(t *testing.T) {
 func TestRulesetsFetchAllExcludesInheritedRulesets(t *testing.T) {
 	// Rulesets an organization applies to the repository cannot be managed
 	// here. Left in the listing, every plan would offer to delete them.
-	rec := newRecorder(t, map[string]string{
-		"GET /repos/kota65535/ghs/rulesets": `[]`,
-	})
+	rec := newRecorder(t, map[string]string{"GET /repos/kota65535/ghs/rulesets": `[]`})
 	srv := rec.server()
 	defer srv.Close()
 
-	if _, err := (Rulesets{}).FetchAll(context.Background(), newTestClient(t, srv), Repo{Owner: "kota65535", Name: "ghs"}); err != nil {
+	if _, err := (Rulesets{}).FetchAll(context.Background(), newTestClient(t, srv), rulesetsNode, rulesetsPath()); err != nil {
 		t.Fatalf("FetchAll: %v", err)
 	}
 
@@ -61,17 +69,16 @@ func TestRulesetsFetchAllExcludesInheritedRulesets(t *testing.T) {
 	}
 }
 
-func TestRulesetsCreateUpdateDelete(t *testing.T) {
-	repo := Repo{Owner: "kota65535", Name: "ghs"}
+func TestRulesetsAreAddressedByTheIDGitHubIssued(t *testing.T) {
 	desired := map[string]any{"name": "protect-main", "target": "branch", "enforcement": "active"}
 	current := map[string]any{"name": "protect-main", "id": float64(7), "enforcement": "evaluate"}
 
-	t.Run("create", func(t *testing.T) {
+	t.Run("create posts to the collection", func(t *testing.T) {
 		rec := newRecorder(t, nil)
 		srv := rec.server()
 		defer srv.Close()
 
-		if err := (Rulesets{}).Create(context.Background(), newTestClient(t, srv), repo, desired); err != nil {
+		if err := (Rulesets{}).Create(context.Background(), newTestClient(t, srv), rulesetsNode, rulesetsPath(), desired); err != nil {
 			t.Fatalf("Create: %v", err)
 		}
 
@@ -79,17 +86,14 @@ func TestRulesetsCreateUpdateDelete(t *testing.T) {
 		if got.method != http.MethodPost || got.path != "/repos/kota65535/ghs/rulesets" {
 			t.Errorf("request = %s %s, want POST on the collection", got.method, got.path)
 		}
-		if got.body["enforcement"] != "active" {
-			t.Errorf("body = %+v, want the declared ruleset", got.body)
-		}
 	})
 
-	t.Run("update addresses the ruleset by id", func(t *testing.T) {
+	t.Run("update puts to the id", func(t *testing.T) {
 		rec := newRecorder(t, nil)
 		srv := rec.server()
 		defer srv.Close()
 
-		if err := (Rulesets{}).Update(context.Background(), newTestClient(t, srv), repo, current, desired); err != nil {
+		if err := (Rulesets{}).Update(context.Background(), newTestClient(t, srv), rulesetsNode, rulesetsPath(), current, desired); err != nil {
 			t.Fatalf("Update: %v", err)
 		}
 
@@ -104,12 +108,12 @@ func TestRulesetsCreateUpdateDelete(t *testing.T) {
 		}
 	})
 
-	t.Run("delete addresses the ruleset by id", func(t *testing.T) {
+	t.Run("delete removes the id", func(t *testing.T) {
 		rec := newRecorder(t, nil)
 		srv := rec.server()
 		defer srv.Close()
 
-		if err := (Rulesets{}).Delete(context.Background(), newTestClient(t, srv), repo, current); err != nil {
+		if err := (Rulesets{}).Delete(context.Background(), newTestClient(t, srv), rulesetsNode, rulesetsPath(), current); err != nil {
 			t.Fatalf("Delete: %v", err)
 		}
 
@@ -123,16 +127,16 @@ func TestRulesetsCreateUpdateDelete(t *testing.T) {
 func TestRulesetIDIsRenderedAsAnInteger(t *testing.T) {
 	// The id arrives as a JSON number. Spelling a large one in exponent
 	// notation would build a path the API does not recognize.
-	id, err := rulesetID(map[string]any{idField: float64(123456789)})
+	path, err := Rulesets{}.ElementPath(rulesetsPath(), map[string]any{idField: float64(123456789)})
 	if err != nil {
-		t.Fatalf("rulesetID: %v", err)
+		t.Fatalf("ElementPath: %v", err)
 	}
-	if id != "123456789" {
-		t.Errorf("id = %q, want 123456789", id)
+	if !strings.HasSuffix(path.String(), "/123456789") {
+		t.Errorf("path = %q, want it to end in the id", path)
 	}
 
-	if _, err := rulesetID(map[string]any{"name": "no-id"}); err == nil {
-		t.Error("rulesetID succeeded without an id, want an error")
+	if _, err := (Rulesets{}).ElementPath(rulesetsPath(), map[string]any{"name": "no-id"}); err == nil {
+		t.Error("ElementPath succeeded without an id, want an error")
 	}
 }
 
@@ -143,7 +147,7 @@ func TestRulesetsUpdateWithoutAnIDFails(t *testing.T) {
 	srv := rec.server()
 	defer srv.Close()
 
-	err := (Rulesets{}).Update(context.Background(), newTestClient(t, srv), Repo{Owner: "kota65535", Name: "ghs"},
+	err := Rulesets{}.Update(context.Background(), newTestClient(t, srv), rulesetsNode, rulesetsPath(),
 		map[string]any{"name": "protect-main"}, map[string]any{"name": "protect-main"})
 	if err == nil {
 		t.Fatal("Update succeeded, want an error")

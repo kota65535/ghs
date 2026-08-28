@@ -24,23 +24,21 @@ Write the settings you care about:
 
 ```yaml
 # .github/settings.yml
-repository:
-  has_issues: true
-  has_wiki: false
-  allow_squash_merge: true
-  allow_merge_commit: false
-  allow_auto_merge: true
-  delete_branch_on_merge: true
-  squash_merge_commit_title: PR_TITLE
+has_issues: true
+has_wiki: false
+allow_squash_merge: true
+allow_merge_commit: false
+allow_auto_merge: true
+delete_branch_on_merge: true
+squash_merge_commit_title: PR_TITLE
 ```
 
 See what would change:
 
 ```console
 $ ghs plan
-~ repository:
-    ~ allow_auto_merge:       false -> true
-    ~ delete_branch_on_merge: false -> true
+~ allow_auto_merge:       false -> true
+~ delete_branch_on_merge: false -> true
 
 Plan: 1 to change.
 ```
@@ -55,16 +53,26 @@ That is the whole tool. Fields you leave out are not managed, so you can start w
 
 Authentication comes from `gh auth login` or `GH_TOKEN`, so a local run needs no setup.
 
-## Field names are the API's
+## The file follows the API's paths
 
-Each top-level key is a REST API resource and the fields below it are that resource's fields, spelled exactly as the API spells them — `repository` is the body of `PATCH /repos/{owner}/{repo}`. No mapping table to learn: the [API reference](https://docs.github.com/en/rest/repos/repos#update-a-repository) is the field reference.
+The top level of the file is the repository — the body of `PATCH /repos/{owner}/{repo}` — so those fields are written directly. Anything GitHub reaches through a longer path goes under a key named after it:
+
+```yaml
+actions:                       # /repos/{owner}/{repo}/actions
+  permissions:                 # .../actions/permissions
+    enabled: true
+    workflow:                  # .../actions/permissions/workflow
+      default_workflow_permissions: read
+```
+
+**Where a setting goes is decided by the endpoint that changes it.** Read the [API reference](https://docs.github.com/en/rest/repos/repos#update-a-repository) and you know where to write it; there is no mapping table to learn, and field names are spelled exactly as the API spells them.
 
 Names, types and enum values are checked against GitHub's OpenAPI description before anything is sent, so a typo fails immediately instead of halfway through:
 
 ```console
 $ ghs plan
-ghs: .github/settings.yml: repository.has_discusions: not a writable field of this resource
-repository.squash_merge_commit_title: "TITLE" is not one of COMMIT_OR_PR_TITLE, PR_TITLE
+ghs: .github/settings.yml: has_discusions: not a writable field here
+squash_merge_commit_title: "TITLE" is not one of COMMIT_OR_PR_TITLE, PR_TITLE
 ```
 
 ## Actions settings
@@ -73,17 +81,25 @@ How Actions runs in the repository — including what a workflow's token is allo
 
 ```yaml
 actions:
-  enabled: true
-  allowed_actions: all              # all, local_only or selected
-  sha_pinning_required: false
-  default_workflow_permissions: read   # the GITHUB_TOKEN a workflow gets
-  can_approve_pull_request_reviews: false
-  approval_policy: first_time_contributors   # for fork pull requests
+  permissions:
+    enabled: true
+    allowed_actions: all                      # all, local_only or selected
+    sha_pinning_required: false
+
+    workflow:
+      default_workflow_permissions: read      # the GITHUB_TOKEN a workflow gets
+      can_approve_pull_request_reviews: false
+
+    fork-pr-contributor-approval:
+      approval_policy: first_time_contributors
+
+    artifact-and-log-retention:
+      days: 90
 ```
 
-GitHub spreads these across four endpoints; you declare them as one thing and ghs works out which requests that takes.
-
 `default_workflow_permissions` is the one worth pinning. It decides whether every workflow in the repository runs with a token that can write to it, and it is a single click away in the web interface.
+
+Each key is the endpoint that writes the fields under it, which is what keeps `days` legible: on its own it says nothing, under `artifact-and-log-retention` it does.
 
 Some of these only exist under certain conditions — the allowed actions are listed only while `allowed_actions` is `selected`. Declare one where it does not apply and the plan shows it as a change against nothing, rather than failing the run.
 
@@ -92,9 +108,10 @@ Some of these only exist under certain conditions — the allowed actions are li
 These are sets of named things rather than one object, so they are written as a list. Each entry is the body that creates one, with `name` identifying it:
 
 ```yaml
-variables:
-  - name: DEPLOY_REGION
-    value: ap-northeast-1
+actions:
+  variables:
+    - name: DEPLOY_REGION
+      value: ap-northeast-1
 
 environments:
   - name: production
@@ -232,8 +249,7 @@ ghs apply [flags]    apply the settings file
 A value of `null` clears a field:
 
 ```yaml
-repository:
-  homepage: null
+homepage: null
 ```
 
 For a list-shaped resource `null` is an error instead, because a line left half-written would otherwise declare that every entry be deleted. Write `[]` when that is what you mean.
