@@ -146,8 +146,161 @@ func TestComputeComparesArraysIncludingOrder(t *testing.T) {
 	if changes := Compute("x", current, map[string]any{"items": []any{"a", "b"}}); len(changes) != 0 {
 		t.Fatalf("got %+v, want no change for identical arrays", changes)
 	}
-	if changes := Compute("x", current, map[string]any{"items": []any{"b", "a"}}); len(changes) != 1 {
-		t.Fatalf("got %d changes, want 1 for a reordered array", len(changes))
+	// Reordering is a change: elements are paired by index, so both positions
+	// are reported.
+	changes := Compute("x", current, map[string]any{"items": []any{"b", "a"}})
+	if len(changes) != 2 {
+		t.Fatalf("got %d changes, want 2 for a reordered array: %+v", len(changes), changes)
+	}
+	if changes[0].Path != "x.items[0]" || changes[1].Path != "x.items[1]" {
+		t.Errorf("paths = %q, %q, want x.items[0], x.items[1]", changes[0].Path, changes[1].Path)
+	}
+}
+
+func TestComputeIgnoresServerDefaultsInsideArrayElements(t *testing.T) {
+	// A ruleset rule declares one parameter and GitHub returns it alongside the
+	// defaults it filled in. Comparing the arrays as wholes would report a
+	// change that apply can never resolve.
+	current := map[string]any{
+		"rules": []any{
+			map[string]any{
+				"type": "pull_request",
+				"parameters": map[string]any{
+					"required_approving_review_count": float64(1),
+					"dismiss_stale_reviews_on_push":   false,
+					"require_code_owner_review":       false,
+				},
+			},
+		},
+	}
+	desired := map[string]any{
+		"rules": []any{
+			map[string]any{
+				"type":       "pull_request",
+				"parameters": map[string]any{"required_approving_review_count": float64(1)},
+			},
+		},
+	}
+
+	if changes := Compute("rulesets", current, desired); len(changes) != 0 {
+		t.Fatalf("got %+v, want no change when only undeclared defaults differ", changes)
+	}
+}
+
+func TestComputeReportsTheDifferingFieldInsideAnArrayElement(t *testing.T) {
+	current := map[string]any{
+		"rules": []any{
+			map[string]any{"type": "pull_request", "parameters": map[string]any{"required_approving_review_count": float64(1)}},
+		},
+	}
+	desired := map[string]any{
+		"rules": []any{
+			map[string]any{"type": "pull_request", "parameters": map[string]any{"required_approving_review_count": float64(2)}},
+		},
+	}
+
+	changes := Compute("rulesets", current, desired)
+	if len(changes) != 1 {
+		t.Fatalf("got %d changes, want 1: %+v", len(changes), changes)
+	}
+	want := "rulesets.rules[0].parameters.required_approving_review_count"
+	if changes[0].Path != want {
+		t.Errorf("Path = %q, want %q", changes[0].Path, want)
+	}
+}
+
+func TestComputeReportsPositionsPastTheEndOfAnArray(t *testing.T) {
+	current := map[string]any{"rules": []any{map[string]any{"type": "deletion"}}}
+	desired := map[string]any{"rules": []any{
+		map[string]any{"type": "deletion"},
+		map[string]any{"type": "non_fast_forward"},
+	}}
+
+	changes := Compute("rulesets", current, desired)
+	if len(changes) != 1 {
+		t.Fatalf("got %d changes, want 1: %+v", len(changes), changes)
+	}
+
+	c := changes[0]
+	if c.Path != "rulesets.rules[1]" {
+		t.Errorf("Path = %q, want the position being added", c.Path)
+	}
+	if !c.CurrentMissing {
+		t.Error("CurrentMissing = false, want true for a position the array does not reach")
+	}
+
+	// The other way round, a position the declaration does not reach is going.
+	changes = Compute("rulesets", desired, current)
+	if len(changes) != 1 {
+		t.Fatalf("got %d changes, want 1: %+v", len(changes), changes)
+	}
+	if !changes[0].DesiredMissing {
+		t.Error("DesiredMissing = false, want true for a position being dropped")
+	}
+	if changes[0].Current == nil {
+		t.Error("Current is nil, want the entry that is going")
+	}
+}
+
+func TestComputeIgnoresServerDefaultsEvenWhenAnArrayChangesLength(t *testing.T) {
+	// Dropping the last rule must not drag the defaults GitHub filled in on
+	// the rules before it into the report. Those fields are not declared, so
+	// they are not managed, and saying they are about to go would be false.
+	current := map[string]any{
+		"rules": []any{
+			map[string]any{
+				"type": "pull_request",
+				"parameters": map[string]any{
+					"required_approving_review_count": float64(1),
+					"require_code_owner_review":       false,
+				},
+			},
+			map[string]any{"type": "required_status_checks"},
+		},
+	}
+	desired := map[string]any{
+		"rules": []any{
+			map[string]any{
+				"type":       "pull_request",
+				"parameters": map[string]any{"required_approving_review_count": float64(1)},
+			},
+		},
+	}
+
+	changes := Compute("rulesets", current, desired)
+	if len(changes) != 1 {
+		t.Fatalf("got %d changes, want only the dropped entry: %+v", len(changes), changes)
+	}
+	if changes[0].Path != "rulesets.rules[1]" {
+		t.Errorf("Path = %q, want only rulesets.rules[1] reported", changes[0].Path)
+	}
+}
+
+func TestComputeComparesScalarArrayElementsWholly(t *testing.T) {
+	current := map[string]any{"include": []any{"~DEFAULT_BRANCH", "refs/heads/release/*"}}
+	desired := map[string]any{"include": []any{"~DEFAULT_BRANCH", "refs/heads/main"}}
+
+	changes := Compute("rulesets", current, desired)
+	if len(changes) != 1 {
+		t.Fatalf("got %d changes, want 1: %+v", len(changes), changes)
+	}
+	if changes[0].Path != "rulesets.include[1]" {
+		t.Errorf("Path = %q, want rulesets.include[1]", changes[0].Path)
+	}
+}
+
+func TestComputeReportsArrayElementAgainstAMismatchedType(t *testing.T) {
+	// An object declared where GitHub reports a scalar is a change, not a
+	// reason to recurse.
+	current := map[string]any{"rules": []any{"pull_request"}}
+	desired := map[string]any{"rules": []any{map[string]any{"type": "pull_request"}}}
+
+	changes := Compute("rulesets", current, desired)
+	if len(changes) != 1 {
+		t.Fatalf("got %d changes, want 1: %+v", len(changes), changes)
+	}
+	if changes[0].Path != "rulesets.rules[0]" {
+		t.Errorf("Path = %q, want rulesets.rules[0]", changes[0].Path)
 	}
 }
 
@@ -178,18 +331,18 @@ func TestRenderText(t *testing.T) {
 	if err := Render(&buf, changes, FormatText); err != nil {
 		t.Fatalf("Render: %v", err)
 	}
-	out := buf.String()
 
-	for _, want := range []string{
-		"repository\n",
-		"~ allow_auto_merge",
-		"false => true",
-		`"https://example.com" => null`,
-		"Plan: 2 fields to change.",
-	} {
-		if !strings.Contains(out, want) {
-			t.Errorf("output missing %q:\n%s", want, out)
-		}
+	// Two fields of one resource are one object to change.
+	want := strings.Join([]string{
+		"~ repository:",
+		"    ~ allow_auto_merge: false -> true",
+		`    ~ homepage:         "https://example.com" -> null`,
+		"",
+		"Plan: 1 to change.",
+		"",
+	}, "\n")
+	if buf.String() != want {
+		t.Errorf("output =\n%s\nwant\n%s", buf.String(), want)
 	}
 }
 
@@ -212,7 +365,7 @@ func TestRenderMarkdown(t *testing.T) {
 	}
 	out := buf.String()
 
-	for _, want := range []string{"### ghs plan", "| Field | Current | Desired |", "| `repository.has_wiki` | `true` | `false` |", "**Plan: 1 field to change.**"} {
+	for _, want := range []string{"### ghs plan", "| Action | Path | Current | Desired |", "| update | `repository.has_wiki` | `true` | `false` |", "**Plan: 1 to change.**"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output missing %q:\n%s", want, out)
 		}

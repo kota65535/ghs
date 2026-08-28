@@ -11,6 +11,7 @@ package schema
 var generated = map[string]Resource{
 	"repository": {
 		Name: "repository",
+		Kind: KindObject,
 		// from PATCH /repos/{owner}/{repo}
 		Fields: map[string]Field{
 			"allow_auto_merge":             {Type: "boolean"},
@@ -68,6 +69,47 @@ var generated = map[string]Resource{
 			"use_squash_pr_title_as_default": {Type: "boolean"},
 			"visibility":                     {Type: "string", Enum: []string{"private", "public"}},
 			"web_commit_signoff_required":    {Type: "boolean"},
+		},
+	},
+	"variables": {
+		Name: "variables",
+		Kind: KindCollection,
+		// from POST /repos/{owner}/{repo}/actions/variables
+		Fields: map[string]Field{
+			"name":  {Type: "string"},
+			"value": {Type: "string"},
+		},
+	},
+	"rulesets": {
+		Name: "rulesets",
+		Kind: KindCollection,
+		// from POST /repos/{owner}/{repo}/rulesets
+		Fields: map[string]Field{
+			"bypass_actors": {Type: "array"},
+			"conditions": {Type: "object", Fields: map[string]Field{
+				"ref_name": {Type: "object", Fields: map[string]Field{
+					"exclude": {Type: "array"},
+					"include": {Type: "array"},
+				}},
+			}},
+			"enforcement": {Type: "string", Enum: []string{"active", "disabled", "evaluate"}},
+			"name":        {Type: "string"},
+			"rules":       {Type: "array"},
+			"target":      {Type: "string", Enum: []string{"branch", "push", "tag"}},
+		},
+	},
+	"environments": {
+		Name: "environments",
+		Kind: KindCollection,
+		// from PUT /repos/{owner}/{repo}/environments/{environment_name}
+		Fields: map[string]Field{
+			"deployment_branch_policy": {Type: "object", Fields: map[string]Field{
+				"custom_branch_policies": {Type: "boolean"},
+				"protected_branches":     {Type: "boolean"},
+			}},
+			"prevent_self_review": {Type: "boolean"},
+			"reviewers":           {Type: "array"},
+			"wait_timer":          {Type: "integer"},
 		},
 	},
 }

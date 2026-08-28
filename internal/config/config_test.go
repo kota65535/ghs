@@ -47,7 +47,7 @@ func TestParseNormalizesValues(t *testing.T) {
 }
 
 func TestParseRejectsUnknownResource(t *testing.T) {
-	_, err := parse(t, "rulesets:\n  foo: bar\n", Options{})
+	_, err := parse(t, "branch_protection:\n  foo: bar\n", Options{})
 	if err == nil || !strings.Contains(err.Error(), "unknown resource") {
 		t.Errorf("err = %v, want an unknown resource error", err)
 	}

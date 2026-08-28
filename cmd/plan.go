@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"context"
-	"fmt"
 	"os"
 
 	"github.com/spf13/cobra"
@@ -12,13 +11,24 @@ import (
 	"github.com/kota65535/ghs/internal/resource"
 )
 
-// resourcePlan is what one resource of the settings file amounts to: the
-// fields declared for it and how they differ from the current settings.
+// resourcePlan is what one resource of the settings file amounts to: what is
+// declared for it and how that differs from the current settings.
+//
+// Exactly one of resource and collection is set, according to how the resource
+// is written in the settings file.
 type resourcePlan struct {
-	name     string
+	name    string
+	changes []diff.Change
+
+	// resource and desired describe a single object.
 	resource resource.Resource
 	desired  map[string]any
-	changes  []diff.Change
+
+	// collection, elements and current describe a set of named elements, both
+	// as declared and as GitHub reports them.
+	collection resource.Collection
+	elements   map[string]map[string]any
+	current    map[string]map[string]any
 }
 
 func newPlanCommand(global *globalOptions) *cobra.Command {
@@ -114,6 +124,15 @@ func computePlans(ctx context.Context, client resource.Client, repo resource.Rep
 	var plans []resourcePlan
 
 	for _, name := range cfg.ResourceNames() {
+		if cfg.IsCollection(name) {
+			plan, err := computeCollectionPlan(ctx, client, repo, name, cfg.Collections[name])
+			if err != nil {
+				return nil, err
+			}
+			plans = append(plans, plan)
+			continue
+		}
+
 		res, err := resource.Lookup(name)
 		if err != nil {
 			return nil, err
@@ -135,6 +154,26 @@ func computePlans(ctx context.Context, client resource.Client, repo resource.Rep
 	return plans, nil
 }
 
+func computeCollectionPlan(ctx context.Context, client resource.Client, repo resource.Repo, name string, elements map[string]map[string]any) (resourcePlan, error) {
+	collection, err := resource.LookupCollection(name)
+	if err != nil {
+		return resourcePlan{}, err
+	}
+
+	current, err := collection.FetchAll(ctx, client, repo)
+	if err != nil {
+		return resourcePlan{}, err
+	}
+
+	return resourcePlan{
+		name:       name,
+		collection: collection,
+		elements:   elements,
+		current:    current,
+		changes:    diff.ComputeCollection(name, current, elements),
+	}, nil
+}
+
 // isTerminal reports whether f is a character device, which is the signal used
 // to decide whether colorizing the output is appropriate.
 func isTerminal(f *os.File) bool {
@@ -143,11 +182,4 @@ func isTerminal(f *os.File) bool {
 		return false
 	}
 	return info.Mode()&os.ModeCharDevice != 0
-}
-
-func pluralizeFields(n int) string {
-	if n == 1 {
-		return "1 field"
-	}
-	return fmt.Sprintf("%d fields", n)
 }

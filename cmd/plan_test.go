@@ -95,7 +95,7 @@ func TestApplySendsWholeDeclarationOnce(t *testing.T) {
 	if len(sent) != 2 || sent["has_issues"] != true || sent["allow_auto_merge"] != true {
 		t.Errorf("sent = %+v, want the whole declaration", sent)
 	}
-	if !strings.Contains(out.String(), "Apply complete. 1 field changed.") {
+	if !strings.Contains(out.String(), "Apply complete. 1 changed.") {
 		t.Errorf("output = %q, want a completion summary", out.String())
 	}
 }

@@ -31,12 +31,19 @@ type operation struct {
 	resource string // top-level key in settings.yml
 	path     string // OpenAPI path
 	method   string // OpenAPI method
+	kind     string // schema.Kind constant the resource is generated with
 }
 
 // operations lists every resource ghs generates field definitions for.
 // Adding a resource means adding a line here.
+//
+// A collection is generated from the operation that creates one element,
+// because that request body is the list of fields an element may declare.
 var operations = []operation{
-	{resource: "repository", path: "/repos/{owner}/{repo}", method: "patch"},
+	{resource: "repository", path: "/repos/{owner}/{repo}", method: "patch", kind: "KindObject"},
+	{resource: "variables", path: "/repos/{owner}/{repo}/actions/variables", method: "post", kind: "KindCollection"},
+	{resource: "rulesets", path: "/repos/{owner}/{repo}/rulesets", method: "post", kind: "KindCollection"},
+	{resource: "environments", path: "/repos/{owner}/{repo}/environments/{environment_name}", method: "put", kind: "KindCollection"},
 }
 
 const (
@@ -169,15 +176,17 @@ func generate(spec map[string]any, ref string) ([]byte, error) {
 	fmt.Fprintf(&b, "// them. See extra.go for the fields it is missing.\n")
 	fmt.Fprintf(&b, "var generated = map[string]Resource{\n")
 
+	c := converter{spec: spec}
 	for _, op := range operations {
 		props, err := requestProperties(spec, op)
 		if err != nil {
 			return nil, err
 		}
-		fields := convertProperties(props)
+		fields := c.properties(props, nil)
 
 		fmt.Fprintf(&b, "\t%q: {\n", op.resource)
 		fmt.Fprintf(&b, "\t\tName: %q,\n", op.resource)
+		fmt.Fprintf(&b, "\t\tKind: %s,\n", op.kind)
 		fmt.Fprintf(&b, "\t\t// from %s %s\n", strings.ToUpper(op.method), op.path)
 		fmt.Fprintf(&b, "\t\tFields: ")
 		writeFields(&b, fields, 2)
@@ -227,19 +236,33 @@ func dig(node any, keys ...string) (any, error) {
 	return node, nil
 }
 
-func convertProperties(props map[string]any) map[string]field {
+// converter turns description schemas into field definitions, following the
+// $ref indirections the description uses to share them.
+type converter struct {
+	spec map[string]any
+}
+
+func (c converter) properties(props map[string]any, seen []string) map[string]field {
 	out := make(map[string]field, len(props))
 	for name, raw := range props {
 		m, ok := raw.(map[string]any)
 		if !ok {
 			continue
 		}
-		out[name] = convertField(m)
+		out[name] = c.field(m, seen)
 	}
 	return out
 }
 
-func convertField(m map[string]any) field {
+func (c converter) field(m map[string]any, seen []string) field {
+	m, seen, ok := c.resolve(m, seen)
+	if !ok {
+		// A ref that cannot be followed leaves the field free-form, which
+		// passes its content through to the API unvalidated rather than
+		// rejecting settings the API would accept.
+		return field{}
+	}
+
 	f := field{}
 
 	if t, ok := m["type"].(string); ok {
@@ -255,11 +278,62 @@ func convertField(m map[string]any) field {
 	}
 	// Nested properties are recorded so that object fields are validated to
 	// the same depth the description defines. An object without declared
-	// properties stays free-form and is passed through unvalidated.
+	// properties stays free-form and is passed through unvalidated, which is
+	// what happens to a schema built from oneOf: the ruleset rules are one
+	// such, and which fields each variant takes is left to the API.
 	if nested, ok := m["properties"].(map[string]any); ok && len(nested) > 0 {
-		f.Fields = convertProperties(nested)
+		f.Fields = c.properties(nested, seen)
 	}
 	return f
+}
+
+// resolve follows a chain of $ref until it reaches a schema, reporting false
+// when the chain cannot be followed or turns back on itself.
+//
+// The returned seen list records the refs followed to get here, so that a
+// schema referring to itself -- directly or through others -- stops rather
+// than recursing forever.
+func (c converter) resolve(m map[string]any, seen []string) (map[string]any, []string, bool) {
+	for {
+		ref, isRef := m["$ref"].(string)
+		if !isRef {
+			return m, seen, true
+		}
+		for _, followed := range seen {
+			if followed == ref {
+				return nil, seen, false
+			}
+		}
+		// A fresh slice per chain: sibling fields legitimately refer to the
+		// same schema, and must not see each other's history.
+		seen = append(append([]string(nil), seen...), ref)
+
+		target, err := c.lookupRef(ref)
+		if err != nil {
+			return nil, seen, false
+		}
+		m = target
+	}
+}
+
+// lookupRef returns the schema a local $ref names.
+//
+// Only refs within the description itself are supported, which is the only
+// form it uses. Pointer escapes (~0, ~1) are not decoded because no key in the
+// description needs them.
+func (c converter) lookupRef(ref string) (map[string]any, error) {
+	if !strings.HasPrefix(ref, "#/") {
+		return nil, fmt.Errorf("unsupported ref %q", ref)
+	}
+	node, err := dig(c.spec, strings.Split(strings.TrimPrefix(ref, "#/"), "/")...)
+	if err != nil {
+		return nil, fmt.Errorf("ref %s: %w", ref, err)
+	}
+	target, ok := node.(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("ref %s does not name a schema", ref)
+	}
+	return target, nil
 }
 
 func writeFields(b *strings.Builder, fields map[string]field, depth int) {

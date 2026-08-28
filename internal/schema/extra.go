@@ -41,6 +41,17 @@ func mergeExtraFields() map[string]Resource {
 			fields[fieldName] = field
 		}
 
+		// Every element of a collection is identified by name, so name is a
+		// field of one whether or not the request body has it. Creating an
+		// environment takes the name in the path -- PUT
+		// /repos/{owner}/{repo}/environments/{environment_name} -- which leaves
+		// it out of the body the definitions are generated from.
+		if resource.IsCollection() {
+			if _, described := fields["name"]; !described {
+				fields["name"] = Field{Type: "string"}
+			}
+		}
+
 		resource.Fields = fields
 		merged[name] = resource
 	}

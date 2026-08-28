@@ -19,11 +19,21 @@ const DefaultPath = ".github/settings.yml"
 
 // Config is a validated settings file.
 type Config struct {
-	// Declared holds, per resource name, the fields declared for it. Values
-	// are normalized so they can be compared with API responses directly.
+	// Declared holds, per single-object resource, the fields declared for it.
+	// Values are normalized so they can be compared with API responses
+	// directly.
 	//
 	// A field that is absent here is not managed: ghs never touches it.
 	Declared map[string]map[string]any
+
+	// Collections holds, per collection resource, its declared elements keyed
+	// by name.
+	//
+	// Where a field is the unit of management for the resources above, an
+	// element is the unit here, and declaring the resource declares the whole
+	// set: an entry present with no elements asks for every existing one to be
+	// deleted, which is not what the resource being absent means.
+	Collections map[string]map[string]map[string]any
 }
 
 // Options adjusts how a settings file is read. It carries nothing today and
@@ -32,12 +42,22 @@ type Options struct{}
 
 // ResourceNames returns the declared resource names in sorted order.
 func (c Config) ResourceNames() []string {
-	names := make([]string, 0, len(c.Declared))
+	names := make([]string, 0, len(c.Declared)+len(c.Collections))
 	for name := range c.Declared {
+		names = append(names, name)
+	}
+	for name := range c.Collections {
 		names = append(names, name)
 	}
 	sort.Strings(names)
 	return names
+}
+
+// IsCollection reports whether the named resource was declared as a set of
+// elements rather than as a single object.
+func (c Config) IsCollection(name string) bool {
+	_, ok := c.Collections[name]
+	return ok
 }
 
 // Load reads and validates the settings file at path.
@@ -57,10 +77,9 @@ func Load(path string, opts Options) (*Config, error) {
 func Parse(b []byte, opts Options) (*Config, error) {
 	// Resources are decoded as raw YAML so that no field is coerced into a Go
 	// type before validation.
-	var resources map[string]map[string]any
+	var resources map[string]any
 
 	dec := yaml.NewDecoder(strings.NewReader(string(b)))
-	dec.KnownFields(true)
 	if err := dec.Decode(&resources); err != nil {
 		return nil, fmt.Errorf("parse: %w", err)
 	}
@@ -68,7 +87,10 @@ func Parse(b []byte, opts Options) (*Config, error) {
 		return nil, errors.New("no resources declared")
 	}
 
-	cfg := &Config{Declared: make(map[string]map[string]any, len(resources))}
+	cfg := &Config{
+		Declared:    make(map[string]map[string]any, len(resources)),
+		Collections: make(map[string]map[string]map[string]any, len(resources)),
+	}
 	var problems []string
 
 	for _, name := range sortedKeys(resources) {
@@ -79,7 +101,20 @@ func Parse(b []byte, opts Options) (*Config, error) {
 			continue
 		}
 
-		declared := resources[name]
+		if resource.IsCollection() {
+			elements, elementProblems := parseCollection(name, resources[name], resource, opts)
+			problems = append(problems, elementProblems...)
+			if elements != nil {
+				cfg.Collections[name] = elements
+			}
+			continue
+		}
+
+		declared, ok := resources[name].(map[string]any)
+		if !ok {
+			problems = append(problems, fmt.Sprintf("%s: expected a mapping of fields", name))
+			continue
+		}
 		if len(declared) == 0 {
 			problems = append(problems, fmt.Sprintf("%s: no fields declared", name))
 			continue

@@ -28,14 +28,34 @@ type Field struct {
 	Fields map[string]Field
 }
 
+// Kind is the shape a resource takes in settings.yml.
+type Kind string
+
+const (
+	// KindObject is a single API object, declared as a mapping of fields.
+	KindObject Kind = "object"
+
+	// KindCollection is a set of named elements, declared as a sequence of
+	// them. Its fields describe one element rather than the whole set.
+	KindCollection Kind = "collection"
+)
+
 // Resource describes one manageable API resource, such as "repository".
 type Resource struct {
 	// Name is the top-level key used in settings.yml.
 	Name string
 
+	// Kind is how the resource is written in the settings file.
+	Kind Kind
+
 	// Fields are the writable fields taken from the API request body schema.
+	// For a collection they are the fields of one element, taken from the
+	// request body that creates it.
 	Fields map[string]Field
 }
+
+// IsCollection reports whether the resource is a set of named elements.
+func (r Resource) IsCollection() bool { return r.Kind == KindCollection }
 
 // Get returns the definition of a top-level field.
 func (r Resource) Get(name string) (Field, bool) {

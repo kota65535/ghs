@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"sort"
+	"strings"
 )
 
 // Client is the subset of go-gh's REST client that ghs uses.
@@ -29,9 +30,8 @@ func (r Repo) String() string { return r.Owner + "/" + r.Name }
 // Resource reads and writes one API resource.
 //
 // Only single-object resources fit this interface. Collections keyed by name,
-// such as rulesets or variables, need create, update and delete, so they get
-// their own interface when the first one is implemented rather than a
-// generalization written in advance for no caller.
+// such as rulesets or variables, need create, update and delete, and are
+// served by Collection instead.
 type Resource interface {
 	// Name is the top-level key in settings.yml.
 	Name() string
@@ -49,7 +49,13 @@ var registry = map[string]Resource{
 	"repository": Repository{},
 }
 
-// Lookup returns the resource registered under name.
+var collections = map[string]Collection{
+	"variables":    Variables{},
+	"rulesets":     Rulesets{},
+	"environments": Environments{},
+}
+
+// Lookup returns the single-object resource registered under name.
 func Lookup(name string) (Resource, error) {
 	r, ok := registry[name]
 	if !ok {
@@ -58,19 +64,23 @@ func Lookup(name string) (Resource, error) {
 	return r, nil
 }
 
+// LookupCollection returns the collection registered under name.
+func LookupCollection(name string) (Collection, error) {
+	c, ok := collections[name]
+	if !ok {
+		return nil, fmt.Errorf("unknown collection %q (this build manages: %s)", name, joinNames())
+	}
+	return c, nil
+}
+
 func joinNames() string {
-	names := make([]string, 0, len(registry))
+	names := make([]string, 0, len(registry)+len(collections))
 	for name := range registry {
 		names = append(names, name)
 	}
-	sort.Strings(names)
-
-	out := ""
-	for i, name := range names {
-		if i > 0 {
-			out += ", "
-		}
-		out += name
+	for name := range collections {
+		names = append(names, name)
 	}
-	return out
+	sort.Strings(names)
+	return strings.Join(names, ", ")
 }

@@ -38,11 +38,11 @@ See what would change:
 
 ```console
 $ ghs plan
-repository
-  ~ allow_auto_merge         false => true
-  ~ delete_branch_on_merge   false => true
+~ repository:
+    ~ allow_auto_merge:       false -> true
+    ~ delete_branch_on_merge: false -> true
 
-Plan: 2 fields to change.
+Plan: 1 to change.
 ```
 
 Apply it:
@@ -67,7 +67,71 @@ ghs: .github/settings.yml: repository.has_discusions: not a writable field of th
 repository.squash_merge_commit_title: "TITLE" is not one of COMMIT_OR_PR_TITLE, PR_TITLE
 ```
 
-`repository` is the only resource for now. Rulesets, variables and environments are next.
+## Rulesets, variables and environments
+
+These are sets of named things rather than one object, so they are written as a list. Each entry is the body that creates one, with `name` identifying it:
+
+```yaml
+variables:
+  - name: DEPLOY_REGION
+    value: ap-northeast-1
+
+environments:
+  - name: production
+    wait_timer: 30
+
+rulesets:
+  - name: protect-main
+    target: branch
+    enforcement: active
+    conditions:
+      ref_name:
+        include: ['~DEFAULT_BRANCH']
+        exclude: []
+    rules:
+      - type: pull_request
+        parameters:
+          required_approving_review_count: 1
+```
+
+Writing one of these keys puts the **whole set** under management, so an entry GitHub has and the file does not is deleted:
+
+```console
+$ ghs plan
+~ rulesets: [
+    - {
+        - enforcement: "active"
+        - id:          7
+        - name:        "legacy"
+      },
+    ~ {
+          name:        "protect-main"
+        ~ enforcement: "evaluate" -> "active"
+      },
+    + {
+        + conditions: {
+            + ref_name: {
+                + include: [
+                    + "~DEFAULT_BRANCH",
+                  ]
+              }
+          }
+        + enforcement: "active"
+        + name:        "release-protect"
+        + target:      "branch"
+      },
+  ]
+
+Plan: 1 to create, 1 to change, 1 to delete.
+```
+
+Leave the key out and ghs does not touch those settings at all — it does not even ask GitHub what is there. To declare that there should be none, write `rulesets: []`, which does ask for every existing one to be deleted and shows up in the plan as such.
+
+The set is what belongs to the repository itself. Rulesets an organization applies to it, and variables defined at the organization level, are not part of it and are never deleted — ghs cannot write them either way. Anything ghs *can* write is in scope, though, including entries some other tool created, so do not manage the same set from two places.
+
+Within an entry the usual rule holds: fields you leave out are not managed.
+
+Secrets are not supported, and are not planned. Their values cannot be read back, so a plan could not tell you whether one matches what you declared — and reporting "no changes" without knowing that would be a lie. Use `gh secret set` or a secrets manager.
 
 ## In CI
 
@@ -138,6 +202,8 @@ A value of `null` clears a field:
 repository:
   homepage: null
 ```
+
+For a list-shaped resource `null` is an error instead, because a line left half-written would otherwise declare that every entry be deleted. Write `[]` when that is what you mean.
 
 Settings changed outside ghs between `plan` and `apply` are overwritten — the file is the source of truth.
 
