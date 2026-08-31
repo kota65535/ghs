@@ -2,6 +2,8 @@
 
 GitHub リポジトリ設定を宣言的に管理する小さな CLI ツール。Go 製、[go-gh](https://github.com/cli/go-gh) を利用。
 
+コードの地図は [architecture.md](architecture.md) にある。ここは設計判断とその理由を扱う。
+
 ## 基本方針
 
 **settings.yml は API のパス構造をそのまま写した木。** 独自の抽象を挟まない。ファイルのルートがリポジトリ（`PATCH /repos/{owner}/{repo}`）で、そのリクエストのフィールドがトップレベルに直接並ぶ。より長いパスで届く設定は、パスセグメントの名前をキーにしてその下に書く。フィールド名・値は GitHub REST API と完全に一致させる。ドキュメントは GitHub の API リファレンスがそのまま使える。

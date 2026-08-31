@@ -263,4 +263,4 @@ go test ./...
 go generate ./...   # refresh the field definitions from the OpenAPI description
 ```
 
-[docs/design.md](docs/design.md) (Japanese) covers how the field definitions are generated and why the tool is built the way it is.
+[docs/architecture.md](docs/architecture.md) (Japanese) is a map of the code. [docs/design.md](docs/design.md) (Japanese) covers how the description is generated and why the tool is built the way it is.
