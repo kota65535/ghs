@@ -149,9 +149,7 @@ func generate(ctx context.Context, client resource.Client, repo resource.Repo, s
 		if value == nil {
 			continue
 		}
-		// A blank line above the key, unless it is the first thing in the file
-		// and there is nothing yet to be apart from.
-		put(doc, key, section(node.Summary, len(doc.Content) > 0), value)
+		put(doc, key, comment(node.Summary), value)
 	}
 
 	return render(repo, doc)
@@ -166,9 +164,9 @@ func render(repo resource.Repo, doc *yaml.Node) ([]byte, error) {
 	if len(doc.Content) == 0 {
 		return buf.Bytes(), nil
 	}
-	buf.WriteString("\n")
 
-	enc := yaml.NewEncoder(&buf)
+	var settings bytes.Buffer
+	enc := yaml.NewEncoder(&settings)
 	enc.SetIndent(2)
 	if err := enc.Encode(doc); err != nil {
 		return nil, fmt.Errorf("render settings: %w", err)
@@ -176,6 +174,9 @@ func render(repo resource.Repo, doc *yaml.Node) ([]byte, error) {
 	if err := enc.Close(); err != nil {
 		return nil, fmt.Errorf("render settings: %w", err)
 	}
+
+	buf.WriteString("\n")
+	buf.Write(space(settings.Bytes()))
 	return buf.Bytes(), nil
 }
 
@@ -342,6 +343,8 @@ func fieldsNode(key string, fields map[string]schema.Field, current map[string]a
 		if describe {
 			put(out, name, comment(field.Description), rendered)
 		} else {
+			// Nothing is written about these, so there is nothing for a blank
+			// line to keep apart.
 			put(out, name, "", rendered)
 		}
 	}
@@ -356,14 +359,49 @@ func put(mapping *yaml.Node, key, comment string, value *yaml.Node) {
 		value)
 }
 
-// section is the comment above a top-level key: what the API description calls
-// the operation that writes it. A node the description gives no title gets the
-// blank line alone.
-func section(summary string, spaced bool) string {
-	if spaced {
-		return "\n" + comment(summary)
+// space puts a blank line above each commented setting and above each
+// top-level key, which is what keeps a setting and what is written about it
+// together instead of running the two into the commentary above them.
+//
+// It is done to the rendered file rather than by asking the encoder for the
+// blank lines, which it writes indented to the depth of the key below them --
+// trailing whitespace, on every one.
+func space(rendered []byte) []byte {
+	lines := strings.Split(strings.TrimRight(string(rendered), "\n"), "\n")
+	out := make([]string, 0, 2*len(lines))
+
+	for _, line := range lines {
+		line = strings.TrimRight(line, " \t")
+		if len(out) > 0 && startsBlock(line, out[len(out)-1]) {
+			out = append(out, "")
+		}
+		out = append(out, line)
 	}
-	return comment(summary)
+
+	return []byte(strings.Join(out, "\n") + "\n")
+}
+
+// startsBlock reports whether a line begins something a blank line belongs
+// above: the commentary of a setting, or a top-level key.
+//
+// Nothing is put directly below the key it belongs to, or below a blank line
+// that is already there.
+func startsBlock(line, previous string) bool {
+	// Nothing is put below a blank line that is already there, below the key a
+	// setting belongs to, or between a setting and the commentary written for
+	// it.
+	if previous == "" || strings.HasSuffix(previous, ":") || isComment(previous) {
+		return false
+	}
+
+	return isComment(line) || (line != "" && !strings.HasPrefix(line, " "))
+}
+
+// isComment reports a comment line. The dash is stripped along with the
+// indentation, since the commentary of the first field of a collection element
+// is written on the line that opens the element.
+func isComment(line string) bool {
+	return strings.HasPrefix(strings.TrimLeft(line, " -"), "#")
 }
 
 // comment renders an API description as the body of a YAML comment.

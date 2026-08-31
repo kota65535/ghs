@@ -36,15 +36,17 @@ Wrote .github/settings.yml from kota65535/ghs. Run `ghs plan` to check it.
 Each setting is written under what the API description says it is for, so the generated file documents itself:
 
 ```yaml
-# Either `true` to allow squash-merging pull requests, or `false` to
-# prevent squash-merging.
+# Either `true` to allow squash-merging pull requests, or `false` to prevent
+# squash-merging.
 allow_squash_merge: true
+
+# Either `true` to enable issues for this repository or `false` to disable them.
+has_issues: true
 
 actions:
   # Set default workflow permissions for a repository
   workflow:
-    # The default workflow permissions granted to the GITHUB_TOKEN when
-    # running workflows.
+    # The default workflow permissions granted to the GITHUB_TOKEN when running workflows.
     default_workflow_permissions: read
 ```
 

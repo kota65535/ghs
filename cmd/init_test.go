@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -106,6 +107,24 @@ func TestGenerateWritesWhatEachSettingIsFor(t *testing.T) {
 	// is a property of the collection, not of the element.
 	if strings.Contains(got, "- # The name of the variable.\n      name: B") {
 		t.Errorf("the second element should not repeat the commentary:\n%s", got)
+	}
+
+	// A blank line above each setting, and none between a setting and what is
+	// written about it. The blank lines are put in by hand rather than asked
+	// of the encoder, which indents them.
+	if !strings.Contains(got, "value: \"1\"\n    - name: B") {
+		t.Errorf("elements should not be pushed apart:\n%s", got)
+	}
+	for _, wrong := range []string{" \n", "\t\n", "#\n\n"} {
+		if strings.Contains(got, wrong) {
+			t.Errorf("generated file holds %q:\n%s", wrong, got)
+		}
+	}
+	// Past the two-line note at the top of the file, which the settings are
+	// meant to be a blank line away from.
+	body := strings.SplitN(got, "\n", 3)[2]
+	if regexp.MustCompile(`#[^\n]*\n\n`).MatchString(body) {
+		t.Errorf("a setting should not be split from its commentary:\n%s", got)
 	}
 
 	for _, line := range strings.Split(got, "\n") {

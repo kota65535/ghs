@@ -62,7 +62,7 @@ func patch(node *Node, path string) {
 		if _, described := fields[NameField]; !described {
 			fields[NameField] = Field{
 				Type:        "string",
-				Description: "The name that identifies this entry. An entry the API reports and this file does not is deleted.",
+				Description: "The name this entry is identified by. An entry the file does not declare is deleted.",
 			}
 		}
 	}
