@@ -24,25 +24,23 @@ Write the settings you care about:
 
 ```yaml
 # .github/settings.yml
-repository:
-  has_issues: true
-  has_wiki: false
-  allow_squash_merge: true
-  allow_merge_commit: false
-  allow_auto_merge: true
-  delete_branch_on_merge: true
-  squash_merge_commit_title: PR_TITLE
+has_issues: true
+has_wiki: false
+allow_squash_merge: true
+allow_merge_commit: false
+allow_auto_merge: true
+delete_branch_on_merge: true
+squash_merge_commit_title: PR_TITLE
 ```
 
 See what would change:
 
 ```console
 $ ghs plan
-repository
-  ~ allow_auto_merge         false => true
-  ~ delete_branch_on_merge   false => true
+~ allow_auto_merge:       false -> true
+~ delete_branch_on_merge: false -> true
 
-Plan: 2 fields to change.
+Plan: 1 to change.
 ```
 
 Apply it:
@@ -55,19 +53,135 @@ That is the whole tool. Fields you leave out are not managed, so you can start w
 
 Authentication comes from `gh auth login` or `GH_TOKEN`, so a local run needs no setup.
 
-## Field names are the API's
+## The file follows the API's paths
 
-Each top-level key is a REST API resource and the fields below it are that resource's fields, spelled exactly as the API spells them — `repository` is the body of `PATCH /repos/{owner}/{repo}`. No mapping table to learn: the [API reference](https://docs.github.com/en/rest/repos/repos#update-a-repository) is the field reference.
+The top level of the file is the repository — the body of `PATCH /repos/{owner}/{repo}` — so those fields are written directly. Anything GitHub reaches through a longer path goes under a key named after it:
+
+```yaml
+actions:                       # /repos/{owner}/{repo}/actions
+  permissions:                 # .../actions/permissions
+    enabled: true
+    workflow:                  # .../actions/permissions/workflow
+      default_workflow_permissions: read
+```
+
+**Where a setting goes is decided by the endpoint that changes it.** Read the [API reference](https://docs.github.com/en/rest/repos/repos#update-a-repository) and you know where to write it; there is no mapping table to learn, and field names are spelled exactly as the API spells them.
 
 Names, types and enum values are checked against GitHub's OpenAPI description before anything is sent, so a typo fails immediately instead of halfway through:
 
 ```console
 $ ghs plan
-ghs: .github/settings.yml: repository.has_discusions: not a writable field of this resource
-repository.squash_merge_commit_title: "TITLE" is not one of COMMIT_OR_PR_TITLE, PR_TITLE
+ghs: .github/settings.yml: has_discusions: not a writable field here
+squash_merge_commit_title: "TITLE" is not one of COMMIT_OR_PR_TITLE, PR_TITLE
 ```
 
-`repository` is the only resource for now. Rulesets, variables and environments are next.
+## Actions settings
+
+How Actions runs in the repository — including what a workflow's token is allowed to do:
+
+```yaml
+actions:
+  permissions:
+    enabled: true
+    allowed_actions: all                      # all, local_only or selected
+    sha_pinning_required: false
+
+    workflow:
+      default_workflow_permissions: read      # the GITHUB_TOKEN a workflow gets
+      can_approve_pull_request_reviews: false
+
+    fork-pr-contributor-approval:
+      approval_policy: first_time_contributors
+
+    artifact-and-log-retention:
+      days: 90
+```
+
+`default_workflow_permissions` is the one worth pinning. It decides whether every workflow in the repository runs with a token that can write to it, and it is a single click away in the web interface.
+
+Each key is the endpoint that writes the fields under it, which is what keeps `days` legible: on its own it says nothing, under `artifact-and-log-retention` it does.
+
+Some of these only exist under certain conditions — the allowed actions are listed only while `allowed_actions` is `selected`. Declare one where it does not apply and the plan shows it as a change against nothing, rather than failing the run.
+
+## Rulesets, variables and environments
+
+These are sets of named things rather than one object, so they are written as a list. Each entry is the body that creates one, with `name` identifying it:
+
+```yaml
+actions:
+  variables:
+    - name: DEPLOY_REGION
+      value: ap-northeast-1
+
+environments:
+  - name: production
+    wait_timer: 30
+
+rulesets:
+  - name: protect-main
+    target: branch
+    enforcement: active
+    conditions:
+      ref_name:
+        include: ['~DEFAULT_BRANCH']
+        exclude: []
+    rules:
+      - type: pull_request
+        parameters:
+          required_approving_review_count: 1
+```
+
+Writing one of these keys puts the **whole set** under management, so an entry GitHub has and the file does not is deleted:
+
+```console
+$ ghs plan
+~ rulesets: [
+    - {
+        - enforcement: "active"
+        - id:          7
+        - name:        "legacy"
+      },
+    ~ {
+          name:        "protect-main"
+        ~ enforcement: "evaluate" -> "active"
+      },
+    + {
+        + conditions: {
+            + ref_name: {
+                + include: [
+                    + "~DEFAULT_BRANCH",
+                  ]
+              }
+          }
+        + enforcement: "active"
+        + name:        "release-protect"
+        + target:      "branch"
+      },
+  ]
+
+Plan: 1 to create, 1 to change, 1 to delete.
+```
+
+Leave the key out and ghs does not touch those settings at all — it does not even ask GitHub what is there. To declare that there should be none, write `rulesets: []`, which does ask for every existing one to be deleted and shows up in the plan as such.
+
+The set is what belongs to the repository itself. Rulesets an organization applies to it, and variables defined at the organization level, are not part of it and are never deleted — ghs cannot write them either way. Anything ghs *can* write is in scope, though, including entries some other tool created, so do not manage the same set from two places.
+
+Within an entry the usual rule holds: fields you leave out are not managed.
+
+An environment's variables go under the environment that owns them:
+
+```yaml
+environments:
+  - name: production
+    wait_timer: 30
+    variables:
+      - name: DEPLOY_REGION
+        value: ap-northeast-1
+```
+
+GitHub reaches these through an endpoint of their own, one variable at a time, but that is a detail of how they are written rather than of what they are: they are a field of the environment, so that is where you declare them. The same rules apply as to any list of entries — declaring `variables` manages the whole set, and leaving the key out means ghs does not touch them.
+
+Secrets are not supported, and are not planned. Their values cannot be read back, so a plan could not tell you whether one matches what you declared — and reporting "no changes" without knowing that would be a lie. Use `gh secret set` or a secrets manager.
 
 ## In CI
 
@@ -135,9 +249,10 @@ ghs apply [flags]    apply the settings file
 A value of `null` clears a field:
 
 ```yaml
-repository:
-  homepage: null
+homepage: null
 ```
+
+For a list-shaped resource `null` is an error instead, because a line left half-written would otherwise declare that every entry be deleted. Write `[]` when that is what you mean.
 
 Settings changed outside ghs between `plan` and `apply` are overwritten — the file is the source of truth.
 
@@ -148,4 +263,4 @@ go test ./...
 go generate ./...   # refresh the field definitions from the OpenAPI description
 ```
 
-[docs/design.md](docs/design.md) (Japanese) covers how the field definitions are generated and why the tool is built the way it is.
+[docs/architecture.md](docs/architecture.md) (Japanese) is a map of the code. [docs/design.md](docs/design.md) (Japanese) covers how the description is generated and why the tool is built the way it is.

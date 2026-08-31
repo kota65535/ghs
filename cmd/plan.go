@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"context"
-	"fmt"
 	"os"
 
 	"github.com/spf13/cobra"
@@ -11,15 +10,6 @@ import (
 	"github.com/kota65535/ghs/internal/diff"
 	"github.com/kota65535/ghs/internal/resource"
 )
-
-// resourcePlan is what one resource of the settings file amounts to: the
-// fields declared for it and how they differ from the current settings.
-type resourcePlan struct {
-	name     string
-	resource resource.Resource
-	desired  map[string]any
-	changes  []diff.Change
-}
 
 func newPlanCommand(global *globalOptions) *cobra.Command {
 	var (
@@ -41,21 +31,20 @@ func newPlanCommand(global *globalOptions) *cobra.Command {
 				return err
 			}
 
-			p, err := buildPlans(cmd.Context(), global)
+			p, err := build(cmd.Context(), global)
 			if err != nil {
 				return err
 			}
-			changes := p.changes()
 
 			var opts []diff.Option
 			if f == diff.FormatText && isTerminal(os.Stdout) {
 				opts = append(opts, diff.WithColor())
 			}
-			if err := diff.Render(cmd.OutOrStdout(), changes, f, opts...); err != nil {
+			if err := diff.Render(cmd.OutOrStdout(), p.plan, f, opts...); err != nil {
 				return err
 			}
 
-			if exitCode && len(changes) > 0 {
+			if exitCode && p.plan.Summarize().Total() > 0 {
 				return errExitChanges
 			}
 			return nil
@@ -71,24 +60,20 @@ func newPlanCommand(global *globalOptions) *cobra.Command {
 // plans is the outcome of reading the settings file and comparing it with the
 // repository, together with what apply needs to act on it.
 type plans struct {
-	repo      resource.Repo
-	client    resource.Client
-	resources []resourcePlan
+	repo   resource.Repo
+	client resource.Client
+
+	// declared mirrors the settings file, and plan the difference between it
+	// and the repository. The two have the same shape, so apply walks them
+	// together.
+	declared *config.Declaration
+	plan     *diff.Plan
 }
 
-// changes flattens the differences across every resource.
-func (p plans) changes() []diff.Change {
-	var all []diff.Change
-	for _, r := range p.resources {
-		all = append(all, r.changes...)
-	}
-	return all
-}
-
-// buildPlans reads the settings file, fetches the current settings and works
-// out the difference for every declared resource.
-func buildPlans(ctx context.Context, global *globalOptions) (plans, error) {
-	cfg, err := loadConfig(global)
+// build reads the settings file, fetches the current settings and works out
+// the difference, walking down the settings file as it goes.
+func build(ctx context.Context, global *globalOptions) (plans, error) {
+	declared, err := loadConfig(global)
 	if err != nil {
 		return plans{}, err
 	}
@@ -103,36 +88,130 @@ func buildPlans(ctx context.Context, global *globalOptions) (plans, error) {
 		return plans{}, err
 	}
 
-	resources, err := computePlans(ctx, client, repo, cfg)
+	plan, err := planNode(ctx, client, "", declared, resource.At(repo), true)
 	if err != nil {
 		return plans{}, err
 	}
-	return plans{repo: repo, client: client, resources: resources}, nil
+
+	return plans{repo: repo, client: client, declared: declared, plan: plan}, nil
 }
 
-func computePlans(ctx context.Context, client resource.Client, repo resource.Repo, cfg *config.Config) ([]resourcePlan, error) {
-	var plans []resourcePlan
+// planNode works out the difference at one node of the settings file and at
+// every node declared below it.
+//
+// The path is threaded through rather than rebuilt, which is how the element
+// names of a collection get into it: the variables of an environment live under
+// that environment's own path.
+//
+// reachable says whether the path is there to be read. It is false below an
+// element that does not exist yet, where asking GitHub what is there would be
+// asking about a thing it has never heard of; everything declared under such an
+// element is arriving with it.
+func planNode(ctx context.Context, client resource.Client, key string, declared *config.Declaration, path resource.Path, reachable bool) (*diff.Plan, error) {
+	node := declared.Node
+	plan := &diff.Plan{Name: node.Segment, Path: key, Collection: node.IsCollection()}
 
-	for _, name := range cfg.ResourceNames() {
-		res, err := resource.Lookup(name)
-		if err != nil {
+	if node.IsCollection() {
+		if err := planElements(ctx, client, key, declared, path, reachable, plan); err != nil {
 			return nil, err
 		}
-
-		current, err := res.Fetch(ctx, client, repo)
-		if err != nil {
-			return nil, err
+	} else if node.Writable() && len(declared.Fields) > 0 {
+		// A namespace has no fields of its own, and a node nobody declared
+		// anything for is not read at all.
+		var current map[string]any
+		if reachable {
+			read, err := resource.ObjectFor(key).Fetch(ctx, client, node, path)
+			if err != nil {
+				return nil, err
+			}
+			current = read
 		}
-
-		desired := cfg.Declared[name]
-		plans = append(plans, resourcePlan{
-			name:     name,
-			resource: res,
-			desired:  desired,
-			changes:  diff.Compute(name, current, desired),
-		})
+		plan.Fields = diff.Compute(current, declared.Fields)
 	}
-	return plans, nil
+
+	for _, name := range declared.ChildNames() {
+		child, _ := declared.Child(name)
+		childPlan, err := planNode(ctx, client, join(key, name), child, path.Child(child.Node.Segment), reachable)
+		if err != nil {
+			return nil, err
+		}
+		plan.Children = append(plan.Children, childPlan)
+	}
+
+	return plan, nil
+}
+
+// planElements matches the declared elements of a collection against the
+// reported ones, and plans whatever is declared under each.
+func planElements(ctx context.Context, client resource.Client, key string, declared *config.Declaration, path resource.Path, reachable bool, plan *diff.Plan) error {
+	collection := resource.CollectionFor(key)
+
+	var current map[string]map[string]any
+	if reachable {
+		read, err := collection.FetchAll(ctx, client, declared.Node, path)
+		if err != nil {
+			return err
+		}
+		current = read
+	}
+
+	for _, match := range diff.MatchElements(key, current, declared.Elements) {
+		element := diff.ElementDiff{
+			Name:    match.Name,
+			Path:    match.Path,
+			Action:  match.Action,
+			Current: match.Current,
+		}
+
+		switch match.Action {
+		case diff.ActionCreate:
+			element.Values = match.Desired
+		case diff.ActionDelete:
+			element.Values = match.Current
+		default:
+			element.Fields = diff.Compute(match.Current, match.Desired)
+		}
+
+		// What is declared under an element is planned against that element's
+		// own path, and only for an element that is or will be there.
+		if match.Action != diff.ActionDelete {
+			elementPath, err := elementPath(collection, path, match)
+			if err != nil {
+				return err
+			}
+			// What an element being created holds is arriving with it, so
+			// there is nothing to read below it yet.
+			for _, name := range declared.ElementChildNames(match.Name) {
+				child, _ := declared.ElementChild(match.Name, name)
+				childPlan, err := planNode(ctx, client, join(match.Path, name), child,
+					elementPath.Child(child.Node.Segment), match.Action != diff.ActionCreate)
+				if err != nil {
+					return err
+				}
+				element.Children = append(element.Children, childPlan)
+			}
+		}
+
+		plan.Elements = append(plan.Elements, element)
+	}
+
+	return nil
+}
+
+// elementPath is where one element sits in the API. An element being created is
+// addressed by what was declared for it, since GitHub has nothing to report.
+func elementPath(collection resource.Collection, path resource.Path, match diff.ElementMatch) (resource.Path, error) {
+	if match.Current != nil {
+		return collection.ElementPath(path, match.Current)
+	}
+	return collection.ElementPath(path, match.Desired)
+}
+
+func join(path, name string) string {
+	if path == "" {
+		return name
+	}
+	return path + "." + name
 }
 
 // isTerminal reports whether f is a character device, which is the signal used
@@ -143,11 +222,4 @@ func isTerminal(f *os.File) bool {
 		return false
 	}
 	return info.Mode()&os.ModeCharDevice != 0
-}
-
-func pluralizeFields(n int) string {
-	if n == 1 {
-		return "1 field"
-	}
-	return fmt.Sprintf("%d fields", n)
 }

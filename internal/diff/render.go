@@ -34,6 +34,9 @@ func ParseFormat(s string) (Format, error) {
 // deliberately not "null", which is a value GitHub can legitimately report.
 const missingLabel = "(missing)"
 
+// NoChangesMessage is what every format reports when nothing differs.
+const NoChangesMessage = "No changes. Settings match the declared configuration."
+
 // Option adjusts how a plan is rendered.
 type Option func(*renderOptions)
 
@@ -47,20 +50,22 @@ func WithColor() Option {
 	return func(o *renderOptions) { o.color = true }
 }
 
-// Render writes the changes in the requested format.
-func Render(w io.Writer, changes []Change, format Format, opts ...Option) error {
+// Render writes the plan in the requested format.
+func Render(w io.Writer, plan *Plan, format Format, opts ...Option) error {
 	var options renderOptions
 	for _, opt := range opts {
 		opt(&options)
 	}
 
+	plan = plan.Prune()
+
 	switch format {
 	case FormatMarkdown:
-		return renderMarkdown(w, changes)
+		return renderMarkdown(w, plan)
 	case FormatJSON:
-		return renderJSON(w, changes)
+		return renderJSON(w, plan)
 	default:
-		return renderText(w, changes, options)
+		return renderText(w, plan, options)
 	}
 }
 
@@ -72,113 +77,464 @@ const (
 )
 
 func colorize(s, color string, enabled bool) string {
-	if !enabled {
+	if !enabled || color == "" {
 		return s
 	}
 	return color + s + ansiReset
 }
 
-func renderText(w io.Writer, changes []Change, options renderOptions) error {
-	if len(changes) == 0 {
-		_, err := fmt.Fprintln(w, "No changes. Settings match the declared configuration.")
+// marker is the sign a change is listed under, following the convention of
+// diffs and of comparable tools.
+func marker(action Action) (sign, color string) {
+	switch action {
+	case ActionCreate:
+		return "+", ansiGreen
+	case ActionDelete:
+		return "-", ansiRed
+	default:
+		return "~", ansiYellow
+	}
+}
+
+// bodyIndent is how far the contents of a node are set in from the key naming
+// it, and closeIndent how far the bracket that ends a block is. Nested blocks
+// repeat the pair, so a bracket lines up under what it closes.
+const (
+	bodyIndent  = "    "
+	closeIndent = "  "
+)
+
+// noSign takes the place of a sign on a line that is there for context rather
+// than because it changed, keeping such a line in step with the ones around it.
+const noSign = " "
+
+func renderText(w io.Writer, plan *Plan, options renderOptions) error {
+	if plan == nil {
+		_, err := fmt.Fprintln(w, NoChangesMessage)
 		return err
 	}
 
-	// Changes are grouped under their resource so the output reads like the
-	// settings file it came from.
-	for _, group := range groupByResource(changes) {
-		if _, err := fmt.Fprintln(w, group.resource); err != nil {
-			return err
-		}
-
-		width := 0
-		for _, c := range group.changes {
-			if n := len(c.field); n > width {
-				width = n
-			}
-		}
-
-		for _, c := range group.changes {
-			current := formatValue(c.change.Current, c.change.CurrentMissing)
-			if c.change.CurrentMissing {
-				current = colorize(current, ansiYellow, options.color)
-			} else {
-				current = colorize(current, ansiRed, options.color)
-			}
-
-			_, err := fmt.Fprintf(w, "  %s %-*s  %s => %s\n",
-				colorize("~", ansiYellow, options.color),
-				width, c.field,
-				current,
-				colorize(formatValue(c.change.Desired, false), ansiGreen, options.color))
-			if err != nil {
-				return err
-			}
-		}
-		if _, err := fmt.Fprintln(w); err != nil {
-			return err
-		}
+	if err := writeBody(w, plan, "", options); err != nil {
+		return err
 	}
-
-	_, err := fmt.Fprintf(w, "Plan: %s to change.\n", pluralize(len(changes)))
+	_, err := fmt.Fprintf(w, "\nPlan: %s.\n", plan.Summarize())
 	return err
 }
 
-func renderMarkdown(w io.Writer, changes []Change) error {
+// writeBody writes a node's own changes and then the nodes below it, which is
+// the order the settings file puts them in.
+func writeBody(w io.Writer, plan *Plan, indent string, options renderOptions) error {
+	if plan.Collection {
+		return writeElements(w, plan.Elements, indent, options)
+	}
+
+	if err := writeFieldChanges(w, plan.Fields, indent, fieldWidth(plan.Fields, nil), options); err != nil {
+		return err
+	}
+	return writeChildren(w, plan.Children, indent, options)
+}
+
+// writeChildren writes each node below this one under the key that names it.
+func writeChildren(w io.Writer, children []*Plan, indent string, options renderOptions) error {
+	for _, child := range children {
+		sign := colorize("~", ansiYellow, options.color)
+
+		if child.Collection {
+			if _, err := fmt.Fprintf(w, "%s%s %s: [\n", indent, sign, child.Name); err != nil {
+				return err
+			}
+			if err := writeElements(w, child.Elements, indent+bodyIndent, options); err != nil {
+				return err
+			}
+			if _, err := fmt.Fprintf(w, "%s%s]\n", indent, closeIndent); err != nil {
+				return err
+			}
+			continue
+		}
+
+		if _, err := fmt.Fprintf(w, "%s%s %s:\n", indent, sign, child.Name); err != nil {
+			return err
+		}
+		if err := writeBody(w, child, indent+bodyIndent, options); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// writeElements writes the elements of a collection as the sequence the
+// settings file writes them as.
+func writeElements(w io.Writer, elements []ElementDiff, indent string, options renderOptions) error {
+	for _, element := range elements {
+		sign, color := marker(element.Action)
+		if _, err := fmt.Fprintf(w, "%s%s {\n", indent, colorize(sign, color, options.color)); err != nil {
+			return err
+		}
+
+		body := indent + bodyIndent
+		if element.Values != nil {
+			// An element arriving or going takes all of its fields with it, so
+			// they are listed out: which fields those are is the thing to
+			// review.
+			if err := writeValues(w, element.Values, sign, color, body, options); err != nil {
+				return err
+			}
+		} else if err := writeElementChanges(w, element, body, options); err != nil {
+			return err
+		}
+
+		if err := writeChildren(w, element.Children, body, options); err != nil {
+			return err
+		}
+
+		if _, err := fmt.Fprintf(w, "%s%s},\n", indent, closeIndent); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// writeElementChanges writes the changed fields of an element, led by the name
+// that says which element it is.
+//
+// The name is written without a sign, as the context it is: it identifies the
+// element rather than being part of what changes about it.
+func writeElementChanges(w io.Writer, element ElementDiff, indent string, options renderOptions) error {
+	width := fieldWidth(element.Fields, []string{NameField})
+
+	_, err := fmt.Fprintf(w, "%s%s %-*s %s\n",
+		indent, noSign, width, NameField+":", formatValue(element.Name, false))
+	if err != nil {
+		return err
+	}
+	return writeFieldChanges(w, element.Fields, indent, width, options)
+}
+
+// writeFieldChanges writes one line per changed field, naming the field, the
+// value it holds and the value it is to hold.
+func writeFieldChanges(w io.Writer, fields []Change, indent string, width int, options renderOptions) error {
+	for _, change := range fields {
+		// A value that exists on only one side is written under the sign for
+		// what happens to it, with nothing on the other side of an arrow to
+		// read against. A list entry being dropped is the usual case.
+		if sign, color, value, only := oneSided(change); only {
+			label := fmt.Sprintf("%s%s %-*s ", indent, colorize(sign, color, options.color), width, change.Label+":")
+			if err := writeValue(w, label, value, sign, color, indent, "", options); err != nil {
+				return err
+			}
+			continue
+		}
+
+		_, err := fmt.Fprintf(w, "%s%s %-*s %s -> %s\n",
+			indent,
+			colorize("~", ansiYellow, options.color),
+			width, change.Label+":",
+			colorize(formatValue(change.Current, false), ansiRed, options.color),
+			colorize(formatValue(change.Desired, false), ansiGreen, options.color))
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// fieldWidth is how wide the labels are once the colon that follows them is
+// counted, which is what the values are lined up against.
+func fieldWidth(fields []Change, extra []string) int {
+	width := 0
+	for _, label := range extra {
+		if n := len(label) + len(":"); n > width {
+			width = n
+		}
+	}
+	for _, change := range fields {
+		if n := len(change.Label) + len(":"); n > width {
+			width = n
+		}
+	}
+	return width
+}
+
+// oneSided reports a change that has a value on one side of the comparison
+// only, along with how to write it.
+func oneSided(c Change) (sign, color string, value any, ok bool) {
+	switch {
+	case c.CurrentMissing:
+		return "+", ansiGreen, c.Desired, true
+	case c.DesiredMissing:
+		return "-", ansiRed, c.Current, true
+	default:
+		return "", "", nil, false
+	}
+}
+
+// writeValues lists the fields of an element that is being created or deleted,
+// opening out nested objects and lists rather than printing them as one long
+// line. Every line carries the element's own sign: all of it is arriving, or
+// all of it is going.
+func writeValues(w io.Writer, values map[string]any, sign, color, indent string, options renderOptions) error {
+	names := make([]string, 0, len(values))
+	for name := range values {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	width := 0
+	for _, name := range names {
+		if n := len(name) + len(":"); n > width {
+			width = n
+		}
+	}
+
+	for _, name := range names {
+		label := fmt.Sprintf("%s%s %-*s ", indent, colorize(sign, color, options.color), width, name+":")
+		if err := writeValue(w, label, values[name], sign, color, indent, "", options); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// writeValue writes one value after the label that introduces it, going into
+// objects and lists so that what they hold can be read a field at a time.
+//
+// The suffix trails whatever the value turns out to be, which is how a list
+// entry gets its comma however deeply the entry itself nests.
+func writeValue(w io.Writer, label string, value any, sign, color, indent, suffix string, options renderOptions) error {
+	switch v := value.(type) {
+	case map[string]any:
+		if len(v) == 0 {
+			_, err := fmt.Fprintf(w, "%s{}%s\n", label, suffix)
+			return err
+		}
+		// A block does not line up with anything, since what follows it is on
+		// the next line. Padding it out would only leave a gap before the
+		// bracket.
+		if _, err := fmt.Fprintf(w, "%s{\n", unpad(label)); err != nil {
+			return err
+		}
+		if err := writeValues(w, v, sign, color, indent+bodyIndent, options); err != nil {
+			return err
+		}
+		_, err := fmt.Fprintf(w, "%s%s}%s\n", indent, closeIndent, suffix)
+		return err
+
+	case []any:
+		if len(v) == 0 {
+			_, err := fmt.Fprintf(w, "%s[]%s\n", label, suffix)
+			return err
+		}
+		if _, err := fmt.Fprintf(w, "%s[\n", unpad(label)); err != nil {
+			return err
+		}
+		// List entries have no name to be introduced by, so the sign stands
+		// in its place.
+		entryLabel := fmt.Sprintf("%s%s%s ", indent, bodyIndent, colorize(sign, color, options.color))
+		for _, entry := range v {
+			if err := writeValue(w, entryLabel, entry, sign, color, indent+bodyIndent, ",", options); err != nil {
+				return err
+			}
+		}
+		_, err := fmt.Fprintf(w, "%s%s]%s\n", indent, closeIndent, suffix)
+		return err
+
+	default:
+		_, err := fmt.Fprintf(w, "%s%s%s\n", label, colorize(formatValue(value, false), color, options.color), suffix)
+		return err
+	}
+}
+
+// unpad drops the padding a label was given to line its value up with the
+// labels around it, leaving the single space that separates the two.
+//
+// A label of nothing but space is indentation rather than padding -- it
+// introduces an entry of a list, which has no name to be padded against -- and
+// is left as it is.
+func unpad(label string) string {
+	trimmed := strings.TrimRight(label, " ")
+	if trimmed == "" {
+		return label
+	}
+	return trimmed + " "
+}
+
+func renderMarkdown(w io.Writer, plan *Plan) error {
 	if _, err := fmt.Fprintln(w, "### ghs plan"); err != nil {
 		return err
 	}
-	if len(changes) == 0 {
-		_, err := fmt.Fprintln(w, "\nNo changes. Settings match the declared configuration.")
+	if plan == nil {
+		_, err := fmt.Fprintf(w, "\n%s\n", NoChangesMessage)
 		return err
 	}
 
-	if _, err := fmt.Fprint(w, "\n| Field | Current | Desired |\n| --- | --- | --- |\n"); err != nil {
+	if _, err := fmt.Fprint(w, "\n| Action | Path | Current | Desired |\n| --- | --- | --- | --- |\n"); err != nil {
 		return err
 	}
-	for _, c := range changes {
-		_, err := fmt.Fprintf(w, "| `%s` | `%s` | `%s` |\n",
-			c.Path, formatValue(c.Current, c.CurrentMissing), formatValue(c.Desired, false))
+	for _, row := range flatten(plan) {
+		_, err := fmt.Fprintf(w, "| %s | %s | %s | %s |\n",
+			row.Action, cell(row.Path),
+			cell(formatValue(row.Current, row.CurrentMissing)),
+			cell(formatValue(row.Desired, row.DesiredMissing)))
 		if err != nil {
 			return err
 		}
 	}
 
-	_, err := fmt.Fprintf(w, "\n**Plan: %s to change.**\n", pluralize(len(changes)))
+	_, err := fmt.Fprintf(w, "\n**Plan: %s.**\n", plan.Summarize())
 	return err
+}
+
+// cell wraps a value in a code span that survives a table.
+//
+// A repository description is free text and lands in these cells, so it may
+// hold a backtick or a pipe. A pipe would split the row and shift every value
+// into the wrong column; the fence is widened past the longest run of
+// backticks in the value so the span cannot be closed early.
+func cell(s string) string {
+	// A pipe ends the cell even inside a code span, so it is escaped either
+	// way.
+	s = strings.ReplaceAll(s, "|", `\|`)
+
+	longest, run := 0, 0
+	for _, r := range s {
+		if r == '`' {
+			run++
+			if run > longest {
+				longest = run
+			}
+			continue
+		}
+		run = 0
+	}
+	if longest == 0 {
+		return "`" + s + "`"
+	}
+
+	// The fence has to outrun the longest run of backticks in the value, and
+	// the padding keeps one at either end from joining it.
+	fence := strings.Repeat("`", longest+1)
+	return fence + " " + s + " " + fence
 }
 
 // jsonChange is the wire form of a change. The field names are snake_case so
 // the output reads like the settings file and the API it mirrors.
 type jsonChange struct {
+	Action         Action `json:"action"`
 	Path           string `json:"path"`
 	Current        any    `json:"current"`
 	Desired        any    `json:"desired"`
 	CurrentMissing bool   `json:"current_missing"`
+	DesiredMissing bool   `json:"desired_missing"`
 }
 
 type jsonPlan struct {
 	Changes []jsonChange `json:"changes"`
 	Summary struct {
+		Created int `json:"created"`
 		Changed int `json:"changed"`
+		Deleted int `json:"deleted"`
 	} `json:"summary"`
 }
 
-func renderJSON(w io.Writer, changes []Change) error {
-	plan := jsonPlan{Changes: make([]jsonChange, 0, len(changes))}
-	for _, c := range changes {
-		plan.Changes = append(plan.Changes, jsonChange{
-			Path:           c.Path,
-			Current:        c.Current,
-			Desired:        c.Desired,
-			CurrentMissing: c.CurrentMissing,
+func renderJSON(w io.Writer, plan *Plan) error {
+	rows := flatten(plan)
+	out := jsonPlan{Changes: make([]jsonChange, 0, len(rows))}
+	for _, row := range rows {
+		out.Changes = append(out.Changes, jsonChange{
+			Action:         row.Action,
+			Path:           row.Path,
+			Current:        row.Current,
+			Desired:        row.Desired,
+			CurrentMissing: row.CurrentMissing,
+			DesiredMissing: row.DesiredMissing,
 		})
 	}
-	plan.Summary.Changed = len(changes)
+
+	summary := plan.Summarize()
+	out.Summary.Created = summary.Created
+	out.Summary.Changed = summary.Changed
+	out.Summary.Deleted = summary.Deleted
 
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
-	return enc.Encode(plan)
+	return enc.Encode(out)
+}
+
+// row is one line of the flat formats: a change with the full path to where it
+// sits, which is what a machine or a table needs.
+type row struct {
+	Action         Action
+	Path           string
+	Current        any
+	Desired        any
+	CurrentMissing bool
+	DesiredMissing bool
+}
+
+// flatten walks a plan into one row per change, for the formats that have no
+// nesting to put them in.
+func flatten(plan *Plan) []row {
+	var rows []row
+	if plan == nil {
+		return rows
+	}
+
+	for _, change := range plan.Fields {
+		rows = append(rows, row{
+			// A change to a field is always an update: what is created or
+			// deleted is a whole element, reported below.
+			Action:         ActionUpdate,
+			Path:           join(plan.Path, change.Label),
+			Current:        change.Current,
+			Desired:        change.Desired,
+			CurrentMissing: change.CurrentMissing,
+			DesiredMissing: change.DesiredMissing,
+		})
+	}
+
+	for _, element := range plan.Elements {
+		if element.Values != nil {
+			// One side of an element arriving or going does not exist, which
+			// is not the same as it being null.
+			r := row{Action: element.Action, Path: element.Path}
+			if element.Action == ActionDelete {
+				r.Current, r.DesiredMissing = element.Values, true
+			} else {
+				r.Desired, r.CurrentMissing = element.Values, true
+			}
+			rows = append(rows, r)
+		}
+		for _, change := range element.Fields {
+			rows = append(rows, row{
+				Action:         ActionUpdate,
+				Path:           join(element.Path, change.Label),
+				Current:        change.Current,
+				Desired:        change.Desired,
+				CurrentMissing: change.CurrentMissing,
+				DesiredMissing: change.DesiredMissing,
+			})
+		}
+		// What an element owns is reported even when the element itself is
+		// arriving: a new environment's variables are created by the same
+		// apply, and a format with no nesting is where they would otherwise
+		// go unseen.
+		for _, child := range element.Children {
+			rows = append(rows, flatten(child)...)
+		}
+	}
+
+	for _, child := range plan.Children {
+		rows = append(rows, flatten(child)...)
+	}
+
+	return rows
+}
+
+func join(path, label string) string {
+	if path == "" {
+		return label
+	}
+	return path + "." + label
 }
 
 // formatValue renders a value the way it appears in settings.yml.
@@ -193,55 +549,40 @@ func formatValue(v any, missing bool) string {
 	return string(b)
 }
 
-func pluralize(n int) string {
-	if n == 1 {
-		return "1 field"
-	}
-	return fmt.Sprintf("%d fields", n)
+// Summary counts a plan by object rather than by field: a node with four
+// changed fields is one object to change, the same as an element with one.
+type Summary struct {
+	Created int
+	Changed int
+	Deleted int
 }
 
-type resourceGroup struct {
-	resource string
-	changes  []struct {
-		field  string
-		change Change
-	}
+// Total is how many objects the plan touches.
+func (s Summary) Total() int { return s.Created + s.Changed + s.Deleted }
+
+// String describes the plan as work still to do.
+func (s Summary) String() string {
+	return s.describe("to create", "to change", "to delete", "nothing to do")
 }
 
-func groupByResource(changes []Change) []resourceGroup {
-	order := []string{}
-	byResource := map[string][]Change{}
-
-	for _, c := range changes {
-		resource, field := splitPath(c.Path)
-		if _, seen := byResource[resource]; !seen {
-			order = append(order, resource)
-		}
-		c.Path = field
-		byResource[resource] = append(byResource[resource], c)
-	}
-	sort.Strings(order)
-
-	groups := make([]resourceGroup, 0, len(order))
-	for _, resource := range order {
-		g := resourceGroup{resource: resource}
-		for _, c := range byResource[resource] {
-			field := c.Path
-			c.Path = resource + "." + field
-			g.changes = append(g.changes, struct {
-				field  string
-				change Change
-			}{field: field, change: c})
-		}
-		groups = append(groups, g)
-	}
-	return groups
+// Done describes the plan as work already carried out.
+func (s Summary) Done() string {
+	return s.describe("created", "changed", "deleted", "nothing changed")
 }
 
-// splitPath separates the leading resource key from the rest of the path.
-func splitPath(path string) (resource, field string) {
-	if i := strings.Index(path, "."); i >= 0 {
-		return path[:i], path[i+1:]
+func (s Summary) describe(created, changed, deleted, none string) string {
+	var parts []string
+	if s.Created > 0 {
+		parts = append(parts, fmt.Sprintf("%d %s", s.Created, created))
 	}
-	return path, path
+	if s.Changed > 0 {
+		parts = append(parts, fmt.Sprintf("%d %s", s.Changed, changed))
+	}
+	if s.Deleted > 0 {
+		parts = append(parts, fmt.Sprintf("%d %s", s.Deleted, deleted))
+	}
+	if len(parts) == 0 {
+		return none
+	}
+	return strings.Join(parts, ", ")
 }

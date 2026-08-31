@@ -99,6 +99,6 @@ func newClient() (*api.RESTClient, error) {
 }
 
 // loadConfig reads the settings file named by the shared flags.
-func loadConfig(opts *globalOptions) (*config.Config, error) {
-	return config.Load(opts.file, config.Options{})
+func loadConfig(opts *globalOptions) (*config.Declaration, error) {
+	return config.Load(opts.file)
 }
