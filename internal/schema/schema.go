@@ -33,6 +33,15 @@ type Field struct {
 	// field" and is passed through to the API untouched.
 	Enum []string
 
+	// Description is what the API description says the field is for, as it
+	// says it: Markdown, several sentences of it where the API has that much
+	// to say. It is empty where the description says nothing.
+	//
+	// Nothing is validated against it. It is here so that `ghs init` can write
+	// each field with its own documentation above it, which is the difference
+	// between a generated file you read and one you look up field by field.
+	Description string
+
 	// Fields holds the nested field definitions of an object field. It is nil
 	// for scalars and for objects whose properties the description leaves
 	// unspecified (a free-form object), in which case the nested content is
@@ -80,6 +89,13 @@ type Node struct {
 	// Method writes this node's fields. It is empty for a namespace, which has
 	// no operation of its own.
 	Method string
+
+	// Summary is the one-line title the API description gives that operation,
+	// such as "Set GitHub Actions permissions for a repository". It is what the
+	// key this node is written under stands for, and `ghs init` writes it above
+	// the key. Empty for a namespace, and for an operation the description
+	// gives no title.
+	Summary string
 
 	// Conditional marks a node whose API path exists only in some
 	// repositories: the allowed actions are there only while the policy is to

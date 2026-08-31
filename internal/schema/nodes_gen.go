@@ -9,65 +9,66 @@ package schema
 // generated describes the settings file exactly as the API description
 // states it. See extra.go for what it is missing.
 var generated = Node{
-	Kind:   KindObject,
-	Method: "PATCH",
+	Kind:    KindObject,
+	Method:  "PATCH",
+	Summary: "Update a repository",
 	// from PATCH /repos/{owner}/{repo}
 	Fields: map[string]Field{
-		"allow_auto_merge":             {Type: "boolean"},
-		"allow_forking":                {Type: "boolean"},
-		"allow_merge_commit":           {Type: "boolean"},
-		"allow_rebase_merge":           {Type: "boolean"},
-		"allow_squash_merge":           {Type: "boolean"},
-		"allow_update_branch":          {Type: "boolean"},
-		"archived":                     {Type: "boolean"},
-		"default_branch":               {Type: "string"},
-		"delete_branch_on_merge":       {Type: "boolean"},
-		"description":                  {Type: "string"},
-		"has_issues":                   {Type: "boolean"},
-		"has_projects":                 {Type: "boolean"},
-		"has_pull_requests":            {Type: "boolean"},
-		"has_wiki":                     {Type: "boolean"},
-		"homepage":                     {Type: "string"},
-		"is_template":                  {Type: "boolean"},
-		"merge_commit_message":         {Type: "string", Enum: []string{"BLANK", "PR_BODY", "PR_TITLE"}},
-		"merge_commit_title":           {Type: "string", Enum: []string{"MERGE_MESSAGE", "PR_TITLE"}},
-		"name":                         {Type: "string"},
-		"private":                      {Type: "boolean"},
-		"pull_request_creation_policy": {Type: "string", Enum: []string{"all", "collaborators_only"}},
-		"security_and_analysis": {Type: "object", Fields: map[string]Field{
-			"advanced_security": {Type: "object", Fields: map[string]Field{
-				"status": {Type: "string"},
+		"allow_auto_merge":             {Type: "boolean", Description: "Either `true` to allow auto-merge on pull requests, or `false` to disallow auto-merge."},
+		"allow_forking":                {Type: "boolean", Description: "Either `true` to allow private forks, or `false` to prevent private forks."},
+		"allow_merge_commit":           {Type: "boolean", Description: "Either `true` to allow merging pull requests with a merge commit, or `false` to prevent merging pull requests with merge commits."},
+		"allow_rebase_merge":           {Type: "boolean", Description: "Either `true` to allow rebase-merging pull requests, or `false` to prevent rebase-merging."},
+		"allow_squash_merge":           {Type: "boolean", Description: "Either `true` to allow squash-merging pull requests, or `false` to prevent squash-merging."},
+		"allow_update_branch":          {Type: "boolean", Description: "Either `true` to always allow a pull request head branch that is behind its base branch to be updated even if it is not required to be up to date before merging, or false otherwise."},
+		"archived":                     {Type: "boolean", Description: "Whether to archive this repository. `false` will unarchive a previously archived repository."},
+		"default_branch":               {Type: "string", Description: "Updates the default branch for this repository."},
+		"delete_branch_on_merge":       {Type: "boolean", Description: "Either `true` to allow automatically deleting head branches when pull requests are merged, or `false` to prevent automatic deletion."},
+		"description":                  {Type: "string", Description: "A short description of the repository."},
+		"has_issues":                   {Type: "boolean", Description: "Either `true` to enable issues for this repository or `false` to disable them."},
+		"has_projects":                 {Type: "boolean", Description: "Either `true` to enable projects for this repository or `false` to disable them. **Note:** If you're creating a repository in an organization that has disabled repository projects, the default is `false`, and if you pass `true`, the API returns an error."},
+		"has_pull_requests":            {Type: "boolean", Description: "Either `true` to allow pull requests for this repository or `false` to prevent pull requests."},
+		"has_wiki":                     {Type: "boolean", Description: "Either `true` to enable the wiki for this repository or `false` to disable it."},
+		"homepage":                     {Type: "string", Description: "A URL with more information about the repository."},
+		"is_template":                  {Type: "boolean", Description: "Either `true` to make this repo available as a template repository or `false` to prevent it."},
+		"merge_commit_message":         {Type: "string", Enum: []string{"BLANK", "PR_BODY", "PR_TITLE"}, Description: "The default value for a merge commit message.\n\n- `PR_TITLE` - default to the pull request's title.\n- `PR_BODY` - default to the pull request's body.\n- `BLANK` - default to a blank commit message."},
+		"merge_commit_title":           {Type: "string", Enum: []string{"MERGE_MESSAGE", "PR_TITLE"}, Description: "Required when using `merge_commit_message`.\n\nThe default value for a merge commit title.\n\n- `PR_TITLE` - default to the pull request's title.\n- `MERGE_MESSAGE` - default to the classic title for a merge message (e.g., Merge pull request #123 from branch-name)."},
+		"name":                         {Type: "string", Description: "The name of the repository."},
+		"private":                      {Type: "boolean", Description: "Either `true` to make the repository private or `false` to make it public. Default: `false`.  \n**Note**: You will get a `422` error if the organization restricts [changing repository visibility](https://docs.github.com/articles/repository-permission-levels-for-an-organization#changing-the-visibility-of-repositories) to organization owners and a non-owner tries to change the value of private."},
+		"pull_request_creation_policy": {Type: "string", Enum: []string{"all", "collaborators_only"}, Description: "The policy that controls who can create pull requests for this repository: `all` or `collaborators_only`."},
+		"security_and_analysis": {Type: "object", Description: "Specify which security and analysis features to enable or disable for the repository.\n\nTo use this parameter, you must have admin permissions for the repository or be an owner or security manager for the organization that owns the repository. For more information, see \"[Managing security managers in your organization](https://docs.github.com/organizations/managing-peoples-access-to-your-organization-with-roles/managing-security-managers-in-your-organization).\"\n\nFor example, to enable GitHub Advanced Security, use this data in the body of the `PATCH` request:\n`{ \"security_and_analysis\": {\"advanced_security\": { \"status\": \"enabled\" } } }`.\n\nYou can check which security and analysis features are currently enabled by using a `GET /repos/{owner}/{repo}` request.", Fields: map[string]Field{
+			"advanced_security": {Type: "object", Description: "Use the `status` property to enable or disable GitHub Advanced Security for this repository.\nFor more information, see \"[About GitHub Advanced\nSecurity](/github/getting-started-with-github/learning-about-github/about-github-advanced-security).\"\n\nFor standalone Code Scanning or Secret Protection products, this parameter cannot be used.", Fields: map[string]Field{
+				"status": {Type: "string", Description: "Can be `enabled` or `disabled`."},
 			}},
-			"code_security": {Type: "object", Fields: map[string]Field{
-				"status": {Type: "string"},
+			"code_security": {Type: "object", Description: "Use the `status` property to enable or disable GitHub Code Security for this repository.", Fields: map[string]Field{
+				"status": {Type: "string", Description: "Can be `enabled` or `disabled`."},
 			}},
-			"secret_scanning": {Type: "object", Fields: map[string]Field{
-				"status": {Type: "string"},
+			"secret_scanning": {Type: "object", Description: "Use the `status` property to enable or disable secret scanning for this repository. For more information, see \"[About secret scanning](/code-security/secret-security/about-secret-scanning).\"", Fields: map[string]Field{
+				"status": {Type: "string", Description: "Can be `enabled` or `disabled`."},
 			}},
-			"secret_scanning_ai_detection": {Type: "object", Fields: map[string]Field{
-				"status": {Type: "string"},
+			"secret_scanning_ai_detection": {Type: "object", Description: "Use the `status` property to enable or disable secret scanning AI detection for this repository. For more information, see \"[Responsible detection of generic secrets with AI](https://docs.github.com/code-security/secret-scanning/using-advanced-secret-scanning-and-push-protection-features/generic-secret-detection/responsible-ai-generic-secrets).\"", Fields: map[string]Field{
+				"status": {Type: "string", Description: "Can be `enabled` or `disabled`."},
 			}},
-			"secret_scanning_delegated_alert_dismissal": {Type: "object", Fields: map[string]Field{
-				"status": {Type: "string"},
+			"secret_scanning_delegated_alert_dismissal": {Type: "object", Description: "Use the `status` property to enable or disable secret scanning delegated alert dismissal for this repository.", Fields: map[string]Field{
+				"status": {Type: "string", Description: "Can be `enabled` or `disabled`."},
 			}},
-			"secret_scanning_delegated_bypass": {Type: "object", Fields: map[string]Field{
-				"status": {Type: "string"},
+			"secret_scanning_delegated_bypass": {Type: "object", Description: "Use the `status` property to enable or disable secret scanning delegated bypass for this repository.", Fields: map[string]Field{
+				"status": {Type: "string", Description: "Can be `enabled` or `disabled`."},
 			}},
-			"secret_scanning_delegated_bypass_options": {Type: "object", Fields: map[string]Field{
-				"reviewers": {Type: "array"},
+			"secret_scanning_delegated_bypass_options": {Type: "object", Description: "Feature options for secret scanning delegated bypass.\nThis object is only honored when `security_and_analysis.secret_scanning_delegated_bypass.status` is set to `enabled`.\nYou can send this object in the same request as `secret_scanning_delegated_bypass`, or update just the options in a separate request.", Fields: map[string]Field{
+				"reviewers": {Type: "array", Description: "The bypass reviewers for secret scanning delegated bypass.\nIf you omit this field, the existing set of reviewers is unchanged."},
 			}},
-			"secret_scanning_non_provider_patterns": {Type: "object", Fields: map[string]Field{
-				"status": {Type: "string"},
+			"secret_scanning_non_provider_patterns": {Type: "object", Description: "Use the `status` property to enable or disable secret scanning non-provider patterns for this repository. For more information, see \"[Supported secret scanning patterns](/code-security/secret-scanning/introduction/supported-secret-scanning-patterns#supported-secrets).\"", Fields: map[string]Field{
+				"status": {Type: "string", Description: "Can be `enabled` or `disabled`."},
 			}},
-			"secret_scanning_push_protection": {Type: "object", Fields: map[string]Field{
-				"status": {Type: "string"},
+			"secret_scanning_push_protection": {Type: "object", Description: "Use the `status` property to enable or disable secret scanning push protection for this repository. For more information, see \"[Protecting pushes with secret scanning](/code-security/secret-scanning/protecting-pushes-with-secret-scanning).\"", Fields: map[string]Field{
+				"status": {Type: "string", Description: "Can be `enabled` or `disabled`."},
 			}},
 		}},
-		"squash_merge_commit_message":    {Type: "string", Enum: []string{"BLANK", "COMMIT_MESSAGES", "PR_BODY"}},
-		"squash_merge_commit_title":      {Type: "string", Enum: []string{"COMMIT_OR_PR_TITLE", "PR_TITLE"}},
-		"use_squash_pr_title_as_default": {Type: "boolean"},
-		"visibility":                     {Type: "string", Enum: []string{"private", "public"}},
-		"web_commit_signoff_required":    {Type: "boolean"},
+		"squash_merge_commit_message":    {Type: "string", Enum: []string{"BLANK", "COMMIT_MESSAGES", "PR_BODY"}, Description: "The default value for a squash merge commit message:\n\n- `PR_BODY` - default to the pull request's body.\n- `COMMIT_MESSAGES` - default to the branch's commit messages.\n- `BLANK` - default to a blank commit message."},
+		"squash_merge_commit_title":      {Type: "string", Enum: []string{"COMMIT_OR_PR_TITLE", "PR_TITLE"}, Description: "Required when using `squash_merge_commit_message`.\n\nThe default value for a squash merge commit title:\n\n- `PR_TITLE` - default to the pull request's title.\n- `COMMIT_OR_PR_TITLE` - default to the commit's title (if only one commit) or the pull request's title (when more than one commit)."},
+		"use_squash_pr_title_as_default": {Type: "boolean", Description: "Either `true` to allow squash-merge commits to use pull request title, or `false` to use commit message. **This property is closing down. Please use `squash_merge_commit_title` instead."},
+		"visibility":                     {Type: "string", Enum: []string{"private", "public"}, Description: "The visibility of the repository."},
+		"web_commit_signoff_required":    {Type: "boolean", Description: "Either `true` to require contributors to sign off on web-based commits, or `false` to not require contributors to sign off on web-based commits."},
 	},
 	Nodes: map[string]Node{
 		"actions": Node{
@@ -78,51 +79,56 @@ var generated = Node{
 					Kind:    KindObject,
 					Segment: "permissions",
 					Method:  "PUT",
+					Summary: "Set GitHub Actions permissions for a repository",
 					// from PUT /repos/{owner}/{repo}/actions/permissions
 					Fields: map[string]Field{
-						"allowed_actions":      {Type: "string", Enum: []string{"all", "local_only", "selected"}},
-						"enabled":              {Type: "boolean"},
-						"sha_pinning_required": {Type: "boolean"},
+						"allowed_actions":      {Type: "string", Enum: []string{"all", "local_only", "selected"}, Description: "The permissions policy that controls the actions and reusable workflows that are allowed to run."},
+						"enabled":              {Type: "boolean", Description: "Whether GitHub Actions is enabled on the repository."},
+						"sha_pinning_required": {Type: "boolean", Description: "Whether actions must be pinned to a full-length commit SHA."},
 					},
 					Nodes: map[string]Node{
 						"artifact-and-log-retention": Node{
 							Kind:    KindObject,
 							Segment: "artifact-and-log-retention",
 							Method:  "PUT",
+							Summary: "Set artifact and log retention settings for a repository",
 							// from PUT /repos/{owner}/{repo}/actions/permissions/artifact-and-log-retention
 							Fields: map[string]Field{
-								"days": {Type: "integer"},
+								"days": {Type: "integer", Description: "The number of days to retain artifacts and logs"},
 							},
 						},
 						"fork-pr-contributor-approval": Node{
 							Kind:    KindObject,
 							Segment: "fork-pr-contributor-approval",
 							Method:  "PUT",
+							Summary: "Set fork PR contributor approval permissions for a repository",
 							// from PUT /repos/{owner}/{repo}/actions/permissions/fork-pr-contributor-approval
 							Fields: map[string]Field{
-								"approval_policy": {Type: "string", Enum: []string{"all_external_contributors", "first_time_contributors", "first_time_contributors_new_to_github"}},
+								"approval_policy": {Type: "string", Enum: []string{"all_external_contributors", "first_time_contributors", "first_time_contributors_new_to_github"}, Description: "The policy that controls when fork PR workflows require approval from a maintainer."},
 							},
 						},
 						"selected-actions": Node{
 							Kind:        KindObject,
 							Segment:     "selected-actions",
 							Method:      "PUT",
+							Summary:     "Set allowed actions and reusable workflows for a repository",
 							Conditional: true,
 							// from PUT /repos/{owner}/{repo}/actions/permissions/selected-actions
 							Fields: map[string]Field{
-								"github_owned_allowed": {Type: "boolean"},
-								"patterns_allowed":     {Type: "array"},
-								"verified_allowed":     {Type: "boolean"},
+								"github_owned_allowed": {Type: "boolean", Description: "Whether GitHub-owned actions are allowed. For example, this includes the actions in the `actions` organization."},
+								"patterns_allowed":     {Type: "array", Description: "Specifies a list of string-matching patterns to allow specific action(s) and reusable workflow(s). Wildcards, tags, and SHAs are allowed. For example, `monalisa/octocat@*`, `monalisa/octocat@v2`, `monalisa/*`.\n\n> [!NOTE]\n> The `patterns_allowed` setting only applies to public repositories."},
+								"verified_allowed":     {Type: "boolean", Description: "Whether actions from GitHub Marketplace verified creators are allowed. Set to `true` to allow all actions by GitHub Marketplace verified creators."},
 							},
 						},
 						"workflow": Node{
 							Kind:    KindObject,
 							Segment: "workflow",
 							Method:  "PUT",
+							Summary: "Set default workflow permissions for a repository",
 							// from PUT /repos/{owner}/{repo}/actions/permissions/workflow
 							Fields: map[string]Field{
-								"can_approve_pull_request_reviews": {Type: "boolean"},
-								"default_workflow_permissions":     {Type: "string", Enum: []string{"read", "write"}},
+								"can_approve_pull_request_reviews": {Type: "boolean", Description: "Whether GitHub Actions can approve pull requests. Enabling this can be a security risk."},
+								"default_workflow_permissions":     {Type: "string", Enum: []string{"read", "write"}, Description: "The default workflow permissions granted to the GITHUB_TOKEN when running workflows."},
 							},
 						},
 					},
@@ -131,10 +137,11 @@ var generated = Node{
 					Kind:    KindCollection,
 					Segment: "variables",
 					Method:  "POST",
+					Summary: "Create a repository variable",
 					// from POST /repos/{owner}/{repo}/actions/variables
 					Fields: map[string]Field{
-						"name":  {Type: "string"},
-						"value": {Type: "string"},
+						"name":  {Type: "string", Description: "The name of the variable."},
+						"value": {Type: "string", Description: "The value of the variable."},
 					},
 				},
 			},
@@ -143,25 +150,27 @@ var generated = Node{
 			Kind:    KindCollection,
 			Segment: "environments",
 			Method:  "PUT",
+			Summary: "Create or update an environment",
 			// from PUT /repos/{owner}/{repo}/environments/{environment_name}
 			Fields: map[string]Field{
-				"deployment_branch_policy": {Type: "object", Fields: map[string]Field{
-					"custom_branch_policies": {Type: "boolean"},
-					"protected_branches":     {Type: "boolean"},
+				"deployment_branch_policy": {Type: "object", Description: "The type of deployment branch policy for this environment. To allow all branches to deploy, set to `null`.", Fields: map[string]Field{
+					"custom_branch_policies": {Type: "boolean", Description: "Whether only branches that match the specified name patterns can deploy to this environment.  If `custom_branch_policies` is `true`, `protected_branches` must be `false`; if `custom_branch_policies` is `false`, `protected_branches` must be `true`."},
+					"protected_branches":     {Type: "boolean", Description: "Whether only branches with branch protection rules can deploy to this environment. If `protected_branches` is `true`, `custom_branch_policies` must be `false`; if `protected_branches` is `false`, `custom_branch_policies` must be `true`."},
 				}},
-				"prevent_self_review": {Type: "boolean"},
-				"reviewers":           {Type: "array"},
-				"wait_timer":          {Type: "integer"},
+				"prevent_self_review": {Type: "boolean", Description: "Whether or not a user who created the job is prevented from approving their own job."},
+				"reviewers":           {Type: "array", Description: "The people or teams that may review jobs that reference the environment. You can list up to six users or teams as reviewers. The reviewers must have at least read access to the repository. Only one of the required reviewers needs to approve the job for it to proceed."},
+				"wait_timer":          {Type: "integer", Description: "The amount of time to delay a job after the job is initially triggered. The time (in minutes) must be an integer between 0 and 43,200 (30 days)."},
 			},
 			Nodes: map[string]Node{
 				"variables": Node{
 					Kind:    KindCollection,
 					Segment: "variables",
 					Method:  "POST",
+					Summary: "Create an environment variable",
 					// from POST /repos/{owner}/{repo}/environments/{environment_name}/variables
 					Fields: map[string]Field{
-						"name":  {Type: "string"},
-						"value": {Type: "string"},
+						"name":  {Type: "string", Description: "The name of the variable."},
+						"value": {Type: "string", Description: "The value of the variable."},
 					},
 				},
 			},
@@ -170,19 +179,20 @@ var generated = Node{
 			Kind:    KindCollection,
 			Segment: "rulesets",
 			Method:  "POST",
+			Summary: "Create a repository ruleset",
 			// from POST /repos/{owner}/{repo}/rulesets
 			Fields: map[string]Field{
-				"bypass_actors": {Type: "array"},
-				"conditions": {Type: "object", Fields: map[string]Field{
+				"bypass_actors": {Type: "array", Description: "The actors that can bypass the rules in this ruleset"},
+				"conditions": {Type: "object", Description: "Parameters for a repository ruleset ref name condition", Fields: map[string]Field{
 					"ref_name": {Type: "object", Fields: map[string]Field{
-						"exclude": {Type: "array"},
-						"include": {Type: "array"},
+						"exclude": {Type: "array", Description: "Array of ref names or patterns to exclude. The condition will not pass if any of these patterns match."},
+						"include": {Type: "array", Description: "Array of ref names or patterns to include. One of these patterns must match for the condition to pass. Also accepts `~DEFAULT_BRANCH` to include the default branch or `~ALL` to include all branches."},
 					}},
 				}},
-				"enforcement": {Type: "string", Enum: []string{"active", "disabled", "evaluate"}},
-				"name":        {Type: "string"},
-				"rules":       {Type: "array"},
-				"target":      {Type: "string", Enum: []string{"branch", "push", "tag"}},
+				"enforcement": {Type: "string", Enum: []string{"active", "disabled", "evaluate"}, Description: "The enforcement level of the ruleset. `evaluate` allows admins to test rules before enforcing them. Admins can view insights on the Rule Insights page (`evaluate` is only available with GitHub Enterprise)."},
+				"name":        {Type: "string", Description: "The name of the ruleset."},
+				"rules":       {Type: "array", Description: "An array of rules within the ruleset."},
+				"target":      {Type: "string", Enum: []string{"branch", "push", "tag"}, Description: "The target of the ruleset"},
 			},
 		},
 	},

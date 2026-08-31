@@ -90,7 +90,8 @@ YAML パーサは `map[string]any` を返す yaml.v3（または goccy/go-yaml�
 
 書き込み可能フィールドの判定は手書きしない。**GitHub 公式 OpenAPI 定義（[github/rest-api-description](https://github.com/github/rest-api-description)）の `PATCH /repos/{owner}/{repo}` requestBody スキーマ**が書き込み可能フィールドの完全な列挙になっている。
 
-- `go generate` で spec から properties を抽出し、リソースごとの許可フィールドリスト（＋型・enum）を Go ファイルに生成する
+- `go generate` で spec から properties を抽出し、リソースごとの許可フィールドリスト（＋型・enum・description）を Go ファイルに生成する
+- description と operation の summary は検証には使わない。`ghs init` が生成する settings.yml に各フィールドの説明コメントとして書き出すためだけに持つ。設定の意味を調べる手間を、生成物を読む手間に置き換える
 - spec はコミット SHA でピンし、Renovate に更新させる。手書き allowlist の追従問題を自動化で解消
 - リソース追加時（rulesets 等）も operation を指定するだけで同じ仕組みが効く
 

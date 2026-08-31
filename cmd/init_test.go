@@ -38,7 +38,7 @@ func TestGenerateWritesTheCurrentSettings(t *testing.T) {
 		"has_issues: true",
 		"has_wiki: false",
 		"default_workflow_permissions: read",
-		"- name: REGION",
+		"name: REGION",
 		"wait_timer: 30",
 	} {
 		if !strings.Contains(got, want) {
@@ -69,6 +69,51 @@ func TestGenerateWritesTheCurrentSettings(t *testing.T) {
 	}
 	if _, err := config.Parse(settings); err != nil {
 		t.Errorf("generated file does not parse: %v\n%s", err, got)
+	}
+}
+
+// TestGenerateWritesWhatEachSettingIsFor checks that the field descriptions and
+// the operation titles from the API description come out as comments, and that
+// they stay within a width a file is read at.
+func TestGenerateWritesWhatEachSettingIsFor(t *testing.T) {
+	client := &fakeClient{reads: map[string]string{
+		"repos/kota65535/ghs":                              `{"has_issues": true}`,
+		"repos/kota65535/ghs/actions/permissions/workflow": `{"default_workflow_permissions": "read"}`,
+		"repos/kota65535/ghs/actions/variables": `{"total_count": 2, "variables": [
+			{"name": "A", "value": "1"}, {"name": "B", "value": "2"}]}`,
+	}}
+
+	settings, err := generate(context.Background(), client, testRepo, []string{repositoryKey, "actions"})
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	got := string(settings)
+
+	for _, want := range []string{
+		// A field, from the request body schema.
+		"# Either `true` to enable issues for this repository or `false` to disable\n# them.\nhas_issues: true",
+		// A key, from the title of the operation that writes it.
+		"# Set default workflow permissions for a repository",
+		// The first element of a collection carries the commentary.
+		"- # The name of the variable.\n      name: A",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("generated file is missing:\n%s\ngot:\n%s", want, got)
+		}
+	}
+
+	// The second element does not repeat it: what the fields of an element are
+	// is a property of the collection, not of the element.
+	if strings.Contains(got, "- # The name of the variable.\n      name: B") {
+		t.Errorf("the second element should not repeat the commentary:\n%s", got)
+	}
+
+	for _, line := range strings.Split(got, "\n") {
+		// Long words are left alone -- the descriptions hold URLs that cannot
+		// be broken -- so the check is that wrapping happened at all.
+		if len(line) > 80 && !strings.Contains(line, "http") {
+			t.Errorf("line is %d characters wide: %q", len(line), line)
+		}
 	}
 }
 
