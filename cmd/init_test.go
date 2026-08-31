@@ -91,7 +91,7 @@ func TestGenerateWritesWhatEachSettingIsFor(t *testing.T) {
 
 	for _, want := range []string{
 		// A field, from the request body schema.
-		"# Either `true` to enable issues for this repository or `false` to disable\n# them.\nhas_issues: true",
+		"# Either `true` to enable issues for this repository or `false` to disable them.\nhas_issues: true",
 		// A key, from the title of the operation that writes it.
 		"# Set default workflow permissions for a repository",
 		// The first element of a collection carries the commentary.
@@ -109,9 +109,11 @@ func TestGenerateWritesWhatEachSettingIsFor(t *testing.T) {
 	}
 
 	for _, line := range strings.Split(got, "\n") {
-		// Long words are left alone -- the descriptions hold URLs that cannot
-		// be broken -- so the check is that wrapping happened at all.
-		if len(line) > 80 && !strings.Contains(line, "http") {
+		// commentWidth plus the "# " and the deepest indentation a comment is
+		// written at. Long words are left alone -- the descriptions hold URLs
+		// that cannot be broken -- so the check is that wrapping happened at
+		// all.
+		if len(line) > 98 && !strings.Contains(line, "http") {
 			t.Errorf("line is %d characters wide: %q", len(line), line)
 		}
 	}

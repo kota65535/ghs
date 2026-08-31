@@ -394,9 +394,13 @@ func comment(description string) string {
 	return strings.Join(lines, "\n")
 }
 
-// commentWidth is how wide a comment line is allowed to get, leaving room for
-// the "# " and for the indentation of a nested key.
-const commentWidth = 72
+// commentWidth is how wide the text of a comment line is allowed to get.
+//
+// The line it ends up on is wider than this: the "# " in front of it, and the
+// indentation of the key it belongs to. The deepest a comment is written is the
+// fields of an element of a collection under an element of a collection, at
+// eight spaces, which puts the longest line this allows at 98 characters.
+const commentWidth = 88
 
 // wrapParagraph breaks one paragraph into lines. The line breaks the
 // description itself has are kept: they are what separates the items of a list
