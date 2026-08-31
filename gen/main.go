@@ -180,9 +180,10 @@ func loadSpec(ref string) (map[string]any, error) {
 
 // field mirrors schema.Field during generation.
 type field struct {
-	Type   string
-	Enum   []string
-	Fields map[string]field
+	Type        string
+	Enum        []string
+	Description string
+	Fields      map[string]field
 }
 
 // node mirrors schema.Node during generation.
@@ -190,6 +191,7 @@ type node struct {
 	kind        string
 	segment     string
 	method      string
+	summary     string
 	conditional bool
 	from        string // the operation it was generated from, for a comment
 
@@ -263,6 +265,7 @@ func buildTree(spec map[string]any) (*node, error) {
 
 		target.kind = op.kind
 		target.method = strings.ToUpper(op.method)
+		target.summary = operationSummary(spec, op)
 		target.conditional = op.conditional
 		target.fields = c.properties(props, nil)
 		target.from = fmt.Sprintf("%s %s", strings.ToUpper(op.method), op.path)
@@ -322,6 +325,9 @@ func writeNode(b *strings.Builder, n *node, depth int) {
 	if n.method != "" {
 		fmt.Fprintf(b, "%s\tMethod: %q,\n", indent, n.method)
 	}
+	if n.summary != "" {
+		fmt.Fprintf(b, "%s\tSummary: %q,\n", indent, n.summary)
+	}
 	if n.conditional {
 		fmt.Fprintf(b, "%s\tConditional: true,\n", indent)
 	}
@@ -351,6 +357,21 @@ func writeNode(b *strings.Builder, n *node, depth int) {
 	}
 
 	fmt.Fprintf(b, "%s}", indent)
+}
+
+// operationSummary is the one-line title the description gives an operation,
+// which is what a node stands for: "Set GitHub Actions permissions for a
+// repository" says more about the key it is written under than the key does.
+//
+// An operation without one is not an error: the summary is a label, and a node
+// without it is simply written without one.
+func operationSummary(spec map[string]any, op operation) string {
+	node, err := dig(spec, "paths", op.path, op.method, "summary")
+	if err != nil {
+		return ""
+	}
+	summary, _ := node.(string)
+	return summary
 }
 
 // requestProperties returns the properties of the operation's JSON request
@@ -415,18 +436,28 @@ func (c converter) properties(props map[string]any, seen []string) map[string]fi
 }
 
 func (c converter) field(m map[string]any, seen []string) field {
+	// Read before the refs are followed: where a property both refers to a
+	// shared schema and describes itself, what it says about itself is the
+	// description of this field in particular.
+	description, _ := m["description"].(string)
+
 	m, seen, ok := c.resolve(m, seen)
 	if !ok {
 		// A ref that cannot be followed leaves the field free-form, which
 		// passes its content through to the API unvalidated rather than
 		// rejecting settings the API would accept.
-		return field{}
+		return field{Description: description}
 	}
 
-	f := field{}
+	f := field{Description: description}
 
 	if t, ok := m["type"].(string); ok {
 		f.Type = t
+	}
+	// A field described only where its shared schema is defined takes the
+	// description from there.
+	if f.Description == "" {
+		f.Description, _ = m["description"].(string)
 	}
 	if raw, ok := m["enum"].([]any); ok {
 		for _, v := range raw {
@@ -520,6 +551,9 @@ func writeFields(b *strings.Builder, fields map[string]field, depth int) {
 				quoted[i] = fmt.Sprintf("%q", v)
 			}
 			parts = append(parts, fmt.Sprintf("Enum: []string{%s}", strings.Join(quoted, ", ")))
+		}
+		if f.Description != "" {
+			parts = append(parts, fmt.Sprintf("Description: %q", f.Description))
 		}
 		fmt.Fprintf(b, "%s", strings.Join(parts, ", "))
 

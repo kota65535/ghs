@@ -20,7 +20,39 @@ go install github.com/kota65535/ghs@latest
 
 ## Use
 
-Write the settings you care about:
+Start from what the repository already has:
+
+```console
+$ ghs init
+? Resources to manage
+  > [x] repository
+    [x] actions
+    [x] environments
+    [ ] rulesets
+
+Wrote .github/settings.yml from kota65535/ghs. Run `ghs plan` to check it.
+```
+
+Each setting is written under what the API description says it is for, so the generated file documents itself:
+
+```yaml
+# Either `true` to allow squash-merging pull requests, or `false` to prevent
+# squash-merging.
+allow_squash_merge: true
+
+# Either `true` to enable issues for this repository or `false` to disable them.
+has_issues: true
+
+actions:
+  # Set default workflow permissions for a repository
+  workflow:
+    # The default workflow permissions granted to the GITHUB_TOKEN when running workflows.
+    default_workflow_permissions: read
+```
+
+A resource you leave unselected is not written to the file, and so is not managed. Only writable fields are written — an id or a timestamp the API reports back is left out — so the first `ghs plan` reports no changes and you can trim the file down from there.
+
+Or write the settings you care about by hand:
 
 ```yaml
 # .github/settings.yml
@@ -233,6 +265,7 @@ jobs:
 ## Reference
 
 ```
+ghs init [flags]     write a settings file from the current settings
 ghs plan [flags]     show what apply would change
 ghs apply [flags]    apply the settings file
 ```
@@ -243,6 +276,9 @@ ghs apply [flags]    apply the settings file
 | `-R`, `--repo` | `owner/repo` (default: the current repository) |
 | `--format` | `plan` only: `text`, `markdown`, `json` |
 | `--exit-code` | `plan` only: exit 2 when there are differences |
+| `--force` | `init` only: overwrite the settings file if it exists |
+
+`init` needs a terminal to ask what to manage, and it leaves two fields out of what it writes: the repository's `name`, which renames it, and `security_and_analysis`, which is reported for every repository but accepted only where the features behind it are available. Declare either by hand if you want it managed.
 
 `plan` exits 0 even when there are differences, so a pull request check does not fail just because changes are pending. Use `--exit-code` if you want to branch on it.
 

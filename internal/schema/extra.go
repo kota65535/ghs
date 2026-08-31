@@ -18,7 +18,10 @@ var extraFields = map[string]map[string]Field{
 		// against the API -- but neither the request body schema nor the REST
 		// documentation lists it. The description does know the field: it
 		// appears in POST /user/repos and in the repository response schema.
-		"has_discussions": {Type: "boolean"},
+		"has_discussions": {
+			Type:        "boolean",
+			Description: "Either `true` to enable discussions for this repository or `false` to disable them.",
+		},
 	},
 }
 
@@ -57,7 +60,10 @@ func patch(node *Node, path string) {
 	// out of the body the description is generated from.
 	if node.IsCollection() {
 		if _, described := fields[NameField]; !described {
-			fields[NameField] = Field{Type: "string"}
+			fields[NameField] = Field{
+				Type:        "string",
+				Description: "The name this entry is identified by. An entry the file does not declare is deleted.",
+			}
 		}
 	}
 

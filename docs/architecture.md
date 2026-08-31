@@ -46,6 +46,7 @@ graph TD
     main[main.go] --> cmd
 
     subgraph cmd["cmd/"]
+        init["init.go<br/>木を辿って現在値を書き出す"]
         plan["plan.go<br/>木を辿って差分を組む"]
         apply["apply.go<br/>宣言と差分を辿って書く"]
     end

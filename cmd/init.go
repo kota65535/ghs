@@ -1,0 +1,540 @@
+package cmd
+
+import (
+	"bytes"
+	"context"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+
+	"github.com/charmbracelet/huh"
+	"github.com/spf13/cobra"
+	"gopkg.in/yaml.v3"
+
+	"github.com/kota65535/ghs/internal/diff"
+	"github.com/kota65535/ghs/internal/resource"
+	"github.com/kota65535/ghs/internal/schema"
+)
+
+// repositoryKey stands for the repository's own fields in the resource
+// selection. Everything else is selected by the key it is written under, but
+// the repository is the top level of the file and has no key of its own.
+const repositoryKey = "repository"
+
+func newInitCommand(global *globalOptions) *cobra.Command {
+	var force bool
+
+	cmd := &cobra.Command{
+		Use:   "init",
+		Short: "Write a settings file from the repository's current settings",
+		Long: "init asks which resources to manage and writes the settings the\n" +
+			"repository has right now, so that the first plan reports no changes and\n" +
+			"the file can be trimmed down from there.\n\n" +
+			"Only writable fields are written: what the API reports and no request\n" +
+			"accepts -- an id, a timestamp -- is left out. A resource that is not\n" +
+			"selected is not written at all, which is what leaves it unmanaged.",
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			// Said now rather than after the prompt and the reads, which is
+			// the only reason to look before writing: the write itself
+			// refuses to replace a file that appeared in the meantime.
+			if _, err := os.Stat(global.file); err == nil && !force {
+				return fmt.Errorf("%s already exists (pass --force to overwrite it)", global.file)
+			}
+
+			repo, err := resolveRepo(global.repo)
+			if err != nil {
+				return err
+			}
+
+			selected, err := selectResources()
+			if err != nil {
+				return err
+			}
+			if len(selected) == 0 {
+				return nil
+			}
+
+			client, err := newClient()
+			if err != nil {
+				return err
+			}
+
+			settings, err := generate(cmd.Context(), client, repo, selected)
+			if err != nil {
+				return err
+			}
+
+			if err := writeFile(global.file, settings, force); err != nil {
+				return err
+			}
+
+			fmt.Fprintf(cmd.OutOrStdout(), "Wrote %s from %s. Run `ghs plan` to check it.\n", global.file, repo)
+			return nil
+		},
+	}
+
+	cmd.Flags().BoolVar(&force, "force", false, "overwrite the settings file if it exists")
+
+	return cmd
+}
+
+// resourceKeys are the resources init offers, in the order they are offered:
+// the repository itself first, then each key that may be written under it.
+func resourceKeys() []string {
+	return append([]string{repositoryKey}, schema.Root().ChildNames()...)
+}
+
+// selectResources asks which resources to manage.
+//
+// Every resource starts selected, since a file describing all of them is the
+// answer more often than not, and deselecting the ones you do not want is less
+// work than checking off the ones you do.
+func selectResources() ([]string, error) {
+	selected := resourceKeys()
+
+	form := huh.NewForm(huh.NewGroup(
+		huh.NewMultiSelect[string]().
+			Title("Resources to manage").
+			Description("Anything left unselected is not written to the file, and so is not managed.").
+			Options(huh.NewOptions(resourceKeys()...)...).
+			Value(&selected),
+	))
+	if err := form.Run(); err != nil {
+		return nil, fmt.Errorf("select resources: %w", err)
+	}
+
+	sort.Strings(selected)
+	return selected, nil
+}
+
+// generate reads the current settings of the selected resources and renders
+// them as a settings file, each field under what the API description says it
+// is for.
+//
+// The file is built as a YAML tree rather than marshalled from a map, for the
+// two things a map cannot carry: the comments, and the order. The repository's
+// own fields have to come first, since they are the top level of the file.
+func generate(ctx context.Context, client resource.Client, repo resource.Repo, selected []string) ([]byte, error) {
+	root := schema.Root()
+	path := resource.At(repo)
+
+	ordered, err := order(selected)
+	if err != nil {
+		return nil, err
+	}
+
+	doc := &yaml.Node{Kind: yaml.MappingNode}
+
+	for _, key := range ordered {
+		if key == repositoryKey {
+			current, err := resource.ObjectFor("").Fetch(ctx, client, root, path)
+			if err != nil {
+				return nil, err
+			}
+			fields, err := fieldsNode("", root.Fields, current, true)
+			if err != nil {
+				return nil, err
+			}
+			// The repository's fields are the top level of the file, so they
+			// go in as they are rather than under a key.
+			doc.Content = append(doc.Content, fields.Content...)
+			continue
+		}
+
+		node, _ := root.Child(key)
+		value, err := fetchNode(ctx, client, key, node, path.Child(node.Segment), true)
+		if err != nil {
+			return nil, err
+		}
+		if value == nil {
+			continue
+		}
+		put(doc, key, comment(node.Summary), value)
+	}
+
+	return render(repo, doc)
+}
+
+// render writes the tree out, under a note saying where it came from.
+func render(repo resource.Repo, doc *yaml.Node) ([]byte, error) {
+	var buf bytes.Buffer
+	fmt.Fprintf(&buf, "# Generated by `ghs init` from %s.\n", repo)
+	buf.WriteString("# Fields left out of this file are not managed: ghs never touches them.\n")
+
+	if len(doc.Content) == 0 {
+		return buf.Bytes(), nil
+	}
+
+	var settings bytes.Buffer
+	enc := yaml.NewEncoder(&settings)
+	enc.SetIndent(2)
+	if err := enc.Encode(doc); err != nil {
+		return nil, fmt.Errorf("render settings: %w", err)
+	}
+	if err := enc.Close(); err != nil {
+		return nil, fmt.Errorf("render settings: %w", err)
+	}
+
+	buf.WriteString("\n")
+	buf.Write(space(settings.Bytes()))
+	return buf.Bytes(), nil
+}
+
+// order puts the selected resources in the order they are written, which is
+// the repository's own fields first: they are the top level of the file, so
+// anything written under a key has to come after them.
+func order(selected []string) ([]string, error) {
+	wanted := make(map[string]bool, len(selected))
+	for _, key := range selected {
+		wanted[key] = true
+	}
+
+	ordered := make([]string, 0, len(selected))
+	for _, key := range resourceKeys() {
+		if wanted[key] {
+			ordered = append(ordered, key)
+			delete(wanted, key)
+		}
+	}
+
+	if unknown := sortedKeys(wanted); len(unknown) > 0 {
+		return nil, fmt.Errorf("unknown resource %q", unknown[0])
+	}
+	return ordered, nil
+}
+
+// fetchNode returns the writable settings at one node of the schema and at
+// every node below it, walking the same tree plan walks.
+//
+// It returns nil where there is nothing to write: a namespace whose children
+// are all empty, or a node whose path this repository does not have.
+//
+// describe says whether to write what the API description says about each key.
+// It is false within the second and later elements of a collection, where the
+// same commentary a second time would only push the settings apart.
+func fetchNode(ctx context.Context, client resource.Client, key string, node schema.Node, path resource.Path, describe bool) (*yaml.Node, error) {
+	if node.IsCollection() {
+		return fetchElements(ctx, client, key, node, path, describe)
+	}
+
+	out := &yaml.Node{Kind: yaml.MappingNode}
+
+	if node.Writable() {
+		current, err := resource.ObjectFor(key).Fetch(ctx, client, node, path)
+		if err != nil {
+			return nil, err
+		}
+		fields, err := fieldsNode(key, node.Fields, current, describe)
+		if err != nil {
+			return nil, err
+		}
+		out.Content = append(out.Content, fields.Content...)
+	}
+
+	for _, name := range node.ChildNames() {
+		child, _ := node.Child(name)
+		value, err := fetchNode(ctx, client, join(key, name), child, path.Child(child.Segment), describe)
+		if err != nil {
+			return nil, err
+		}
+		if value == nil {
+			continue
+		}
+		if describe {
+			put(out, name, comment(child.Summary), value)
+		} else {
+			put(out, name, "", value)
+		}
+	}
+
+	if len(out.Content) == 0 {
+		return nil, nil
+	}
+	return out, nil
+}
+
+// fetchElements returns the elements of a collection, each with whatever is
+// written under it.
+//
+// A collection with no elements comes out as an empty sequence rather than as
+// nothing at all: the key is being written because the set was selected, and
+// declaring the empty set is how a repository with no rulesets is stated.
+func fetchElements(ctx context.Context, client resource.Client, key string, node schema.Node, path resource.Path, describe bool) (*yaml.Node, error) {
+	collection := resource.CollectionFor(key)
+
+	current, err := collection.FetchAll(ctx, client, node, path)
+	if err != nil {
+		return nil, err
+	}
+
+	out := &yaml.Node{Kind: yaml.SequenceNode}
+	for i, name := range sortedKeys(current) {
+		// Only the first element carries the commentary: what the fields of one
+		// are is a property of the collection, not of the element.
+		describeElement := describe && i == 0
+
+		element, err := fieldsNode(key, node.Fields, current[name], describeElement)
+		if err != nil {
+			return nil, err
+		}
+
+		if len(node.Nodes) > 0 {
+			elementPath, err := collection.ElementPath(path, current[name])
+			if err != nil {
+				return nil, err
+			}
+			for _, childName := range node.ChildNames() {
+				child, _ := node.Child(childName)
+				value, err := fetchNode(ctx, client, join(diff.ElementPath(key, name), childName), child,
+					elementPath.Child(child.Segment), describeElement)
+				if err != nil {
+					return nil, err
+				}
+				if value == nil {
+					continue
+				}
+				if describeElement {
+					put(element, childName, comment(child.Summary), value)
+				} else {
+					put(element, childName, "", value)
+				}
+			}
+		}
+
+		out.Content = append(out.Content, element)
+	}
+
+	return out, nil
+}
+
+// fieldsNode renders what the API reported and a request would accept,
+// dropping everything else: the fields only ever read back, and the fields
+// this repository has nothing for. Each one is written under what the
+// description says it is for.
+//
+// Nested objects are filtered to the depth the description defines. An object
+// whose properties it leaves unspecified is carried over whole, since there is
+// nothing to filter it against.
+func fieldsNode(key string, fields map[string]schema.Field, current map[string]any, describe bool) (*yaml.Node, error) {
+	out := &yaml.Node{Kind: yaml.MappingNode}
+
+	for _, name := range sortedKeys(fields) {
+		field := fields[name]
+
+		value, reported := current[name]
+		if !reported || value == nil || unmanaged(key, name) {
+			continue
+		}
+
+		rendered := &yaml.Node{}
+		if nested, ok := value.(map[string]any); ok && len(field.Fields) > 0 {
+			filtered, err := fieldsNode(join(key, name), field.Fields, nested, describe)
+			if err != nil {
+				return nil, err
+			}
+			if len(filtered.Content) == 0 {
+				continue
+			}
+			rendered = filtered
+		} else if err := rendered.Encode(value); err != nil {
+			return nil, fmt.Errorf("render %s: %w", join(key, name), err)
+		}
+
+		if describe {
+			put(out, name, comment(field.Description), rendered)
+		} else {
+			// Nothing is written about these, so there is nothing for a blank
+			// line to keep apart.
+			put(out, name, "", rendered)
+		}
+	}
+
+	return out, nil
+}
+
+// put writes one key of a mapping, with the comment that belongs above it.
+func put(mapping *yaml.Node, key, comment string, value *yaml.Node) {
+	mapping.Content = append(mapping.Content,
+		&yaml.Node{Kind: yaml.ScalarNode, Value: key, HeadComment: comment},
+		value)
+}
+
+// space puts a blank line above each commented setting and above each
+// top-level key, which is what keeps a setting and what is written about it
+// together instead of running the two into the commentary above them.
+//
+// It is done to the rendered file rather than by asking the encoder for the
+// blank lines, which it writes indented to the depth of the key below them --
+// trailing whitespace, on every one.
+func space(rendered []byte) []byte {
+	lines := strings.Split(strings.TrimRight(string(rendered), "\n"), "\n")
+	out := make([]string, 0, 2*len(lines))
+
+	for _, line := range lines {
+		line = strings.TrimRight(line, " \t")
+		if len(out) > 0 && startsBlock(line, out[len(out)-1]) {
+			out = append(out, "")
+		}
+		out = append(out, line)
+	}
+
+	return []byte(strings.Join(out, "\n") + "\n")
+}
+
+// startsBlock reports whether a line begins something a blank line belongs
+// above: the commentary of a setting, or a top-level key.
+//
+// Nothing is put directly below the key it belongs to, or below a blank line
+// that is already there.
+func startsBlock(line, previous string) bool {
+	// Nothing is put below a blank line that is already there, below the key a
+	// setting belongs to, or between a setting and the commentary written for
+	// it.
+	if previous == "" || strings.HasSuffix(previous, ":") || isComment(previous) {
+		return false
+	}
+
+	return isComment(line) || (line != "" && !strings.HasPrefix(line, " "))
+}
+
+// isComment reports a comment line. The dash is stripped along with the
+// indentation, since the commentary of the first field of a collection element
+// is written on the line that opens the element.
+func isComment(line string) bool {
+	return strings.HasPrefix(strings.TrimLeft(line, " -"), "#")
+}
+
+// comment renders an API description as the body of a YAML comment.
+//
+// The description is Markdown, and is carried over as it is written rather than
+// cut down to a first sentence: what a field means is sometimes in the second
+// one, and the point of writing it into the file is not having to look it up.
+// Only the line breaks are ours, since the description arrives as paragraphs of
+// arbitrary length.
+func comment(description string) string {
+	description = strings.TrimSpace(description)
+	if description == "" {
+		return ""
+	}
+
+	var lines []string
+	for _, paragraph := range strings.Split(description, "\n\n") {
+		wrapped := wrapParagraph(paragraph)
+		if len(wrapped) == 0 {
+			continue
+		}
+		// The paragraphs run together rather than keeping the blank line
+		// between them: a blank line inside a comment is a blank line in the
+		// file, which reads as the end of one comment and the start of the
+		// next rather than as a paragraph break.
+		lines = append(lines, wrapped...)
+	}
+	return strings.Join(lines, "\n")
+}
+
+// commentWidth is how wide the text of a comment line is allowed to get.
+//
+// The line it ends up on is wider than this: the "# " in front of it, and the
+// indentation of the key it belongs to. The deepest a comment is written is the
+// fields of an element of a collection under an element of a collection, at
+// eight spaces, which puts the longest line this allows at 98 characters.
+const commentWidth = 88
+
+// wrapParagraph breaks one paragraph into lines. The line breaks the
+// description itself has are kept: they are what separates the items of a list
+// from each other.
+func wrapParagraph(paragraph string) []string {
+	var out []string
+	for _, line := range strings.Split(paragraph, "\n") {
+		out = append(out, wrapLine(strings.TrimSpace(line))...)
+	}
+	return out
+}
+
+func wrapLine(line string) []string {
+	words := strings.Fields(line)
+	if len(words) == 0 {
+		return nil
+	}
+
+	// A list item that has to be broken is indented where it continues, so
+	// that the item and the line below it are not read as two items.
+	continuation := ""
+	if strings.HasPrefix(line, "- ") || strings.HasPrefix(line, "* ") {
+		continuation = "  "
+	}
+
+	var out []string
+	current := words[0]
+	for _, word := range words[1:] {
+		if len(current)+1+len(word) > commentWidth {
+			out = append(out, current)
+			current = continuation + word
+			continue
+		}
+		current += " " + word
+	}
+	return append(out, current)
+}
+
+// unmanaged reports a writable field that init leaves out of the file.
+//
+// Both entries are fields a generated file would be worse for holding. name
+// renames the repository, which is not a setting anyone means to manage in the
+// same file as the merge options. security_and_analysis is reported for every
+// repository but accepted only where the features behind it are available, so
+// writing back what was read would fail the first apply on most repositories.
+//
+// Either can still be declared by hand; this is only about what init writes.
+func unmanaged(key, name string) bool {
+	if key != "" {
+		return false
+	}
+	return name == schema.NameField || name == "security_and_analysis"
+}
+
+// writeFile puts the settings file in place, creating the directory it sits in.
+//
+// Without --force the file is created exclusively, so a settings file that
+// appeared while the prompt was up or the reads were running is not replaced.
+// Looking before writing would not answer the question: what matters is the
+// state at the moment of the write.
+func writeFile(path string, settings []byte, force bool) error {
+	if dir := filepath.Dir(path); dir != "." {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return fmt.Errorf("create %s: %w", dir, err)
+		}
+	}
+
+	flags := os.O_WRONLY | os.O_CREATE | os.O_TRUNC
+	if !force {
+		flags = os.O_WRONLY | os.O_CREATE | os.O_EXCL
+	}
+
+	f, err := os.OpenFile(path, flags, 0o644)
+	if errors.Is(err, os.ErrExist) {
+		return fmt.Errorf("%s already exists (pass --force to overwrite it)", path)
+	}
+	if err != nil {
+		return fmt.Errorf("write %s: %w", path, err)
+	}
+	defer f.Close()
+
+	if _, err := f.Write(settings); err != nil {
+		return fmt.Errorf("write %s: %w", path, err)
+	}
+	return f.Close()
+}
+
+func sortedKeys[V any](m map[string]V) []string {
+	keys := make([]string, 0, len(m))
+	for key := range m {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
+}
