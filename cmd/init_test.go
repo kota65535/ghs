@@ -2,9 +2,13 @@ package cmd
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/charmbracelet/huh"
 
 	"github.com/kota65535/ghs/internal/config"
 )
@@ -134,6 +138,57 @@ func TestGenerateWritesWhatEachSettingIsFor(t *testing.T) {
 		// all.
 		if len(line) > 98 && !strings.Contains(line, "http") {
 			t.Errorf("line is %d characters wide: %q", len(line), line)
+		}
+	}
+}
+
+// TestWriteFileRefusesToReplaceASettingsFile checks the protection that
+// matters: the one at the moment of the write. The check before the prompt only
+// saves the user the questions.
+func TestWriteFileRefusesToReplaceASettingsFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), ".github", "settings.yml")
+
+	if err := writeFile(path, []byte("has_issues: true\n"), false); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	err := writeFile(path, []byte("has_issues: false\n"), false)
+	if err == nil {
+		t.Fatal("writing over an existing settings file should have failed")
+	}
+	if !strings.Contains(err.Error(), "--force") {
+		t.Errorf("the error should say how to overwrite it: %v", err)
+	}
+
+	// The file it refused to replace is untouched.
+	if b, readErr := os.ReadFile(path); readErr != nil || string(b) != "has_issues: true\n" {
+		t.Errorf("the existing file was modified: %q, %v", b, readErr)
+	}
+
+	if err := writeFile(path, []byte("has_issues: false\n"), true); err != nil {
+		t.Fatalf("write with --force: %v", err)
+	}
+	if b, err := os.ReadFile(path); err != nil || string(b) != "has_issues: false\n" {
+		t.Errorf("--force should have overwritten it: %q, %v", b, err)
+	}
+}
+
+// TestTheResourcePromptStartsFullySelected checks what huh does with a
+// pre-populated value, which is not something its API states: the options are
+// marked selected, so submitting the prompt untouched asks for everything.
+// Were that to change, init would quietly write nothing at all.
+func TestTheResourcePromptStartsFullySelected(t *testing.T) {
+	selected := resourceKeys()
+	field := huh.NewMultiSelect[string]().
+		Options(huh.NewOptions(resourceKeys()...)...).
+		Value(&selected)
+
+	// The marker is the theme's, so what is checked is that every option is
+	// rendered the same way as the others and that none of them is bare.
+	view := field.View()
+	for _, key := range resourceKeys() {
+		if !strings.Contains(view, "✓ "+key) {
+			t.Errorf("option %q does not start selected:\n%s", key, view)
 		}
 	}
 }

@@ -3,6 +3,7 @@ package cmd
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -37,6 +38,9 @@ func newInitCommand(global *globalOptions) *cobra.Command {
 			"selected is not written at all, which is what leaves it unmanaged.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			// Said now rather than after the prompt and the reads, which is
+			// the only reason to look before writing: the write itself
+			// refuses to replace a file that appeared in the meantime.
 			if _, err := os.Stat(global.file); err == nil && !force {
 				return fmt.Errorf("%s already exists (pass --force to overwrite it)", global.file)
 			}
@@ -64,7 +68,7 @@ func newInitCommand(global *globalOptions) *cobra.Command {
 				return err
 			}
 
-			if err := writeFile(global.file, settings); err != nil {
+			if err := writeFile(global.file, settings, force); err != nil {
 				return err
 			}
 
@@ -494,16 +498,36 @@ func unmanaged(key, name string) bool {
 }
 
 // writeFile puts the settings file in place, creating the directory it sits in.
-func writeFile(path string, settings []byte) error {
+//
+// Without --force the file is created exclusively, so a settings file that
+// appeared while the prompt was up or the reads were running is not replaced.
+// Looking before writing would not answer the question: what matters is the
+// state at the moment of the write.
+func writeFile(path string, settings []byte, force bool) error {
 	if dir := filepath.Dir(path); dir != "." {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return fmt.Errorf("create %s: %w", dir, err)
 		}
 	}
-	if err := os.WriteFile(path, settings, 0o644); err != nil {
+
+	flags := os.O_WRONLY | os.O_CREATE | os.O_TRUNC
+	if !force {
+		flags = os.O_WRONLY | os.O_CREATE | os.O_EXCL
+	}
+
+	f, err := os.OpenFile(path, flags, 0o644)
+	if errors.Is(err, os.ErrExist) {
+		return fmt.Errorf("%s already exists (pass --force to overwrite it)", path)
+	}
+	if err != nil {
 		return fmt.Errorf("write %s: %w", path, err)
 	}
-	return nil
+	defer f.Close()
+
+	if _, err := f.Write(settings); err != nil {
+		return fmt.Errorf("write %s: %w", path, err)
+	}
+	return f.Close()
 }
 
 func sortedKeys[V any](m map[string]V) []string {
