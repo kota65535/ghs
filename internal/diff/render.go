@@ -371,10 +371,10 @@ func renderMarkdown(w io.Writer, plan *Plan) error {
 		return err
 	}
 	for _, row := range flatten(plan) {
-		_, err := fmt.Fprintf(w, "| %s | `%s` | `%s` | `%s` |\n",
-			row.Action, row.Path,
-			formatValue(row.Current, row.CurrentMissing),
-			formatValue(row.Desired, row.DesiredMissing))
+		_, err := fmt.Fprintf(w, "| %s | %s | %s | %s |\n",
+			row.Action, cell(row.Path),
+			cell(formatValue(row.Current, row.CurrentMissing)),
+			cell(formatValue(row.Desired, row.DesiredMissing)))
 		if err != nil {
 			return err
 		}
@@ -382,6 +382,38 @@ func renderMarkdown(w io.Writer, plan *Plan) error {
 
 	_, err := fmt.Fprintf(w, "\n**Plan: %s.**\n", plan.Summarize())
 	return err
+}
+
+// cell wraps a value in a code span that survives a table.
+//
+// A repository description is free text and lands in these cells, so it may
+// hold a backtick or a pipe. A pipe would split the row and shift every value
+// into the wrong column; the fence is widened past the longest run of
+// backticks in the value so the span cannot be closed early.
+func cell(s string) string {
+	// A pipe ends the cell even inside a code span, so it is escaped either
+	// way.
+	s = strings.ReplaceAll(s, "|", `\|`)
+
+	longest, run := 0, 0
+	for _, r := range s {
+		if r == '`' {
+			run++
+			if run > longest {
+				longest = run
+			}
+			continue
+		}
+		run = 0
+	}
+	if longest == 0 {
+		return "`" + s + "`"
+	}
+
+	// The fence has to outrun the longest run of backticks in the value, and
+	// the padding keeps one at either end from joining it.
+	fence := strings.Repeat("`", longest+1)
+	return fence + " " + s + " " + fence
 }
 
 // jsonChange is the wire form of a change. The field names are snake_case so
@@ -462,15 +494,15 @@ func flatten(plan *Plan) []row {
 
 	for _, element := range plan.Elements {
 		if element.Values != nil {
-			value := element.Values
+			// One side of an element arriving or going does not exist, which
+			// is not the same as it being null.
 			r := row{Action: element.Action, Path: element.Path}
 			if element.Action == ActionDelete {
-				r.Current = value
+				r.Current, r.DesiredMissing = element.Values, true
 			} else {
-				r.Desired = value
+				r.Desired, r.CurrentMissing = element.Values, true
 			}
 			rows = append(rows, r)
-			continue
 		}
 		for _, change := range element.Fields {
 			rows = append(rows, row{
@@ -482,6 +514,10 @@ func flatten(plan *Plan) []row {
 				DesiredMissing: change.DesiredMissing,
 			})
 		}
+		// What an element owns is reported even when the element itself is
+		// arriving: a new environment's variables are created by the same
+		// apply, and a format with no nesting is where they would otherwise
+		// go unseen.
 		for _, child := range element.Children {
 			rows = append(rows, flatten(child)...)
 		}

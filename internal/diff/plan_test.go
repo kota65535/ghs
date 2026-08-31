@@ -284,3 +284,78 @@ func TestParseFormat(t *testing.T) {
 		t.Error("ParseFormat(\"yaml\") succeeded, want an error")
 	}
 }
+
+func TestFlattenReportsWhatANewElementOwns(t *testing.T) {
+	// The flat formats are what a CI review reads. Leaving out the variables
+	// of an environment being created would let apply make changes nobody saw.
+	plan := &Plan{Children: []*Plan{{
+		Name: "environments", Path: "environments", Collection: true,
+		Elements: []ElementDiff{{
+			Name: "production", Path: `environments["production"]`, Action: ActionCreate,
+			Values: map[string]any{"name": "production"},
+			Children: []*Plan{{
+				Name: "variables", Path: `environments["production"].variables`, Collection: true,
+				Elements: []ElementDiff{{
+					Name: "REGION", Path: `environments["production"].variables["REGION"]`,
+					Action: ActionCreate, Values: map[string]any{"name": "REGION", "value": "us-east-1"},
+				}},
+			}},
+		}},
+	}}}
+
+	var buf bytes.Buffer
+	if err := Render(&buf, plan, FormatJSON); err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	if !strings.Contains(buf.String(), `variables[\"REGION\"]`) {
+		t.Errorf("output leaves out the variable arriving with the environment:\n%s", buf.String())
+	}
+}
+
+func TestFlattenMarksTheAbsentSideOfAnElement(t *testing.T) {
+	// A created element has no current state; a deleted one has no desired
+	// state. Reporting either as a plain null makes an absent thing look like
+	// a real null value.
+	plan := &Plan{Children: []*Plan{{
+		Name: "variables", Path: "variables", Collection: true,
+		Elements: []ElementDiff{
+			{Name: "ADD", Path: `variables["ADD"]`, Action: ActionCreate, Values: map[string]any{"name": "ADD"}},
+			{Name: "GONE", Path: `variables["GONE"]`, Action: ActionDelete, Values: map[string]any{"name": "GONE"}},
+		},
+	}}}
+
+	rows := flatten(plan.Prune())
+	if len(rows) != 2 {
+		t.Fatalf("got %d rows, want 2: %+v", len(rows), rows)
+	}
+	if !rows[0].CurrentMissing || rows[0].DesiredMissing {
+		t.Errorf("create row = %+v, want only the current side missing", rows[0])
+	}
+	if !rows[1].DesiredMissing || rows[1].CurrentMissing {
+		t.Errorf("delete row = %+v, want only the desired side missing", rows[1])
+	}
+}
+
+func TestMarkdownSurvivesValuesHoldingTableSyntax(t *testing.T) {
+	// A repository description is free text. A pipe would split the row and
+	// shift every value into the wrong column; a backtick would close the code
+	// span early.
+	plan := &Plan{Fields: []Change{
+		changed("description", "old", "a | b and a ` tick"),
+	}}
+
+	var buf bytes.Buffer
+	if err := Render(&buf, plan, FormatMarkdown); err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+
+	for _, line := range strings.Split(buf.String(), "\n") {
+		if !strings.HasPrefix(line, "| ") || strings.HasPrefix(line, "| ---") {
+			continue
+		}
+		// Four columns means five pipes; any more and the value broke out.
+		if got := strings.Count(line, "|") - strings.Count(line, `\|`); got != 5 {
+			t.Errorf("row has %d unescaped pipes, want 5: %s", got, line)
+		}
+	}
+}
