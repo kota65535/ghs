@@ -53,7 +53,7 @@ func Execute() int {
 		SilenceErrors: true,
 	}
 
-	root.PersistentFlags().StringVarP(&opts.file, "file", "f", config.DefaultPath, "path to the settings file")
+	root.PersistentFlags().StringVarP(&opts.file, "settings", "s", config.DefaultPath, "path to the settings file")
 	root.PersistentFlags().StringVarP(&opts.repo, "repo", "R", "", "repository to manage, as owner/repo (default: the current repository)")
 
 	root.AddCommand(newInitCommand(&opts), newPlanCommand(&opts), newApplyCommand(&opts))
