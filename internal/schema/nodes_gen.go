@@ -98,10 +98,11 @@ var generated = Node{
 							},
 						},
 						"fork-pr-contributor-approval": Node{
-							Kind:    KindObject,
-							Segment: "fork-pr-contributor-approval",
-							Method:  "PUT",
-							Summary: "Set fork PR contributor approval permissions for a repository",
+							Kind:        KindObject,
+							Segment:     "fork-pr-contributor-approval",
+							Method:      "PUT",
+							Summary:     "Set fork PR contributor approval permissions for a repository",
+							Conditional: true,
 							// from PUT /repos/{owner}/{repo}/actions/permissions/fork-pr-contributor-approval
 							Fields: map[string]Field{
 								"approval_policy": {Type: "string", Enum: []string{"all_external_contributors", "first_time_contributors", "first_time_contributors_new_to_github"}, Description: "The policy that controls when fork PR workflows require approval from a maintainer."},
