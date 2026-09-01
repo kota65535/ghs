@@ -1,20 +1,14 @@
 name: codegen
 
-# Regenerating means downloading a 13 MB API description, so this runs only
-# when something that feeds the generator changes -- most often a Renovate pull
-# request that moves the pinned commit in gen/openapi.ref without touching the
-# code it generates.
+# This runs on every pull request rather than only the ones that touch the
+# generator, because a required status check has to report on all of them:
+# one that never starts leaves the pull request waiting forever. Regenerating
+# downloads a 13 MB API description but still finishes in a few seconds.
 
 on:
   push:
     branches: [main]
-    paths:
-      - gen/**
-      - internal/schema/fields_gen.go
   pull_request:
-    paths:
-      - gen/**
-      - internal/schema/fields_gen.go
 
 permissions:
   contents: read
@@ -50,14 +44,14 @@ jobs:
           fi
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git commit -am 'chore: regenerate the field definitions'
+          git commit -am 'chore: regenerate the node definitions'
           git push
 
       - name: Check the committed output matches
         run: |
           if ! git diff --exit-code; then
             echo
-            echo "The generated field definitions are out of date."
+            echo "The generated node definitions are out of date."
             echo "Run 'go generate ./...' and commit the result."
             exit 1
           fi
