@@ -272,11 +272,11 @@ ghs apply [flags]    apply the settings file
 
 | Flag | |
 | --- | --- |
-| `-f`, `--file` | settings file (default `.github/settings.yml`) |
+| `-c`, `--config` | settings file (default `.github/settings.yml`) |
 | `-R`, `--repo` | `owner/repo` (default: the current repository) |
 | `--format` | `plan` only: `text`, `markdown`, `json` |
 | `--exit-code` | `plan` only: exit 2 when there are differences |
-| `--force` | `init` only: overwrite the settings file if it exists |
+| `-f`, `--force` | `init` only: overwrite the settings file if it exists |
 
 `init` needs a terminal to ask what to manage, and it leaves two fields out of what it writes: the repository's `name`, which renames it, and `security_and_analysis`, which is reported for every repository but accepted only where the features behind it are available. Declare either by hand if you want it managed.
 

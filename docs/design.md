@@ -167,8 +167,8 @@ plan と apply の間に手動変更が入った場合、apply は宣言値で�
 ## CLI
 
 ```
-ghs plan  [-f .github/settings.yml] [-R owner/repo] [--format text|markdown|json] [--exit-code] [--allow-unknown]
-ghs apply [-f .github/settings.yml] [-R owner/repo] [--allow-unknown]
+ghs plan  [-c .github/settings.yml] [-R owner/repo] [--format text|markdown|json] [--exit-code] [--allow-unknown]
+ghs apply [-c .github/settings.yml] [-R owner/repo] [--allow-unknown]
 ```
 
 `-R owner/repo` は gh の慣習に合わせる。省略時は go-gh の `repository.Current()` で git remote から解決。
