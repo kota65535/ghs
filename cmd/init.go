@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"sort"
@@ -346,7 +347,7 @@ func fieldsNode(key string, fields map[string]schema.Field, current map[string]a
 				return nil, err
 			}
 			rendered = filtered
-		} else if err := rendered.Encode(value); err != nil {
+		} else if err := rendered.Encode(integral(value)); err != nil {
 			return nil, fmt.Errorf("render %s: %w", join(key, name), err)
 		}
 
@@ -421,6 +422,35 @@ func joinComments(comments ...string) string {
 		}
 	}
 	return strings.Join(present, "\n")
+}
+
+// integral rewrites the whole numbers JSON decoding leaves as float64 back as
+// integers, all the way down: written as a float, an actor id comes out as
+// 1.312304e+06, which is neither what the API reported nor a number anyone
+// would write by hand.
+//
+// Only what an int64 holds exactly is converted; anything larger is left as it
+// arrived rather than rounded to a different number.
+func integral(v any) any {
+	switch value := v.(type) {
+	case float64:
+		if value == math.Trunc(value) && math.Abs(value) < 1<<53 {
+			return int64(value)
+		}
+	case map[string]any:
+		out := make(map[string]any, len(value))
+		for name, field := range value {
+			out[name] = integral(field)
+		}
+		return out
+	case []any:
+		out := make([]any, len(value))
+		for i, element := range value {
+			out[i] = integral(element)
+		}
+		return out
+	}
+	return v
 }
 
 // put writes one key of a mapping, with the comment that belongs above it.
