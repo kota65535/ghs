@@ -152,10 +152,11 @@ rulesets:
 	}
 }
 
-func TestParseCollectionLeavesFreeFormContentAlone(t *testing.T) {
-	// A ruleset rule is described as a choice between two dozen shapes, so the
-	// description declares no fields for one. Its content goes to the API to
-	// judge rather than being rejected here.
+func TestParseCollectionValidatesARuleByItsType(t *testing.T) {
+	// A ruleset rule is described as a choice between two dozen shapes, and
+	// which of them applies is what the rule's own type says. A parameter is
+	// checked against that shape rather than against every shape a rule could
+	// have.
 	cfg := mustParse(t, `
 rulesets:
   - name: protect-main
@@ -167,6 +168,71 @@ rulesets:
 	rules := child(t, cfg, "rulesets").Elements["protect-main"]["rules"].([]any)
 	if len(rules) != 1 {
 		t.Fatalf("rules = %+v, want one rule", rules)
+	}
+
+	_, err := parse(t, `
+rulesets:
+  - name: protect-main
+    rules:
+      - type: pull_request
+        parameters:
+          required_approving_review_cont: 2
+`)
+	if err == nil || !strings.Contains(err.Error(),
+		`rulesets["protect-main"].rules[0].parameters.required_approving_review_cont`) {
+		t.Errorf("err = %v, want the typo reported under the rule it is in", err)
+	}
+
+	// A parameter of another rule type is not one of this rule's.
+	_, err = parse(t, `
+rulesets:
+  - name: protect-main
+    rules:
+      - type: pull_request
+        parameters:
+          do_not_enforce_on_create: true
+`)
+	if err == nil {
+		t.Error("a parameter of another rule type should not be accepted")
+	}
+}
+
+func TestParseCollectionRejectsARuleTypeItDoesNotKnow(t *testing.T) {
+	// A rule type is checked like any other value with a set of accepted ones.
+	// GitHub adds rule types between releases, so this is as likely to be a
+	// type ghs has not caught up with as one that does not exist -- which is
+	// why the pinned description is followed daily rather than why the check is
+	// skipped.
+	_, err := parse(t, `
+rulesets:
+  - name: protect-main
+    rules:
+      - type: a_rule_from_the_future
+        parameters:
+          unheard_of: true
+`)
+	if err == nil || !strings.Contains(err.Error(), `rulesets["protect-main"].rules[0].type`) {
+		t.Fatalf("err = %v, want the type reported as the problem", err)
+	}
+	// The accepted types are listed, the way an enum's accepted values are.
+	if !strings.Contains(err.Error(), "pull_request") {
+		t.Errorf("err = %v, want the accepted types listed", err)
+	}
+}
+
+func TestParseCollectionValidatesElementsOfAnArrayWithOneShape(t *testing.T) {
+	// The reviewers of an environment are all the same shape, whatever each of
+	// them says its type is, so the type does not select anything and every
+	// element is checked against the one shape there is.
+	_, err := parse(t, `
+environments:
+  - name: production
+    reviewers:
+      - type: User
+        i_d: 1
+`)
+	if err == nil || !strings.Contains(err.Error(), `environments["production"].reviewers[0].i_d`) {
+		t.Errorf("err = %v, want the typo reported under the reviewer it is in", err)
 	}
 }
 

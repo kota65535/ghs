@@ -47,6 +47,41 @@ type Field struct {
 	// unspecified (a free-form object), in which case the nested content is
 	// passed through without validation.
 	Fields map[string]Field
+
+	// Variants describes what an element of an array field may be, keyed by
+	// the value of the element's "type" field. It is nil for a field that is
+	// not an array, and for an array of scalars.
+	//
+	// The rules of a ruleset are the reason it is keyed rather than a single
+	// definition: which parameters a rule accepts depends on the type it
+	// declares, and the description states them as alternatives titled with
+	// the type that selects each. An array whose elements have one shape is
+	// held under the empty string, since no declared value selects it.
+	//
+	// Nothing is validated against this either: it is what lets `ghs init`
+	// write the parameters of a rule with their own documentation, which the
+	// description has and the file otherwise leaves you to look up.
+	Variants map[string]Field
+}
+
+// Variant returns what the description says an element of this array field is,
+// and whether it says anything at all.
+//
+// An array whose elements have one shape holds it under the empty string, and
+// that shape describes every element whatever the element says about itself: a
+// deployment reviewer declares whether it is a User or a Team, and the two are
+// the same shape.
+//
+// Where the description states alternatives instead, which one applies is a
+// question the element answers: a ruleset rule declares a type, and what it
+// accepts follows from that.
+func (f Field) Variant(element map[string]any) (Field, bool) {
+	if single, ok := f.Variants[""]; ok {
+		return single, true
+	}
+	declared, _ := element["type"].(string)
+	variant, known := f.Variants[declared]
+	return variant, known
 }
 
 // Kind is the shape a node takes in settings.yml.

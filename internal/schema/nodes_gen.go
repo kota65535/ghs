@@ -55,7 +55,13 @@ var generated = Node{
 				"status": {Type: "string", Description: "Can be `enabled` or `disabled`."},
 			}},
 			"secret_scanning_delegated_bypass_options": {Type: "object", Description: "Feature options for secret scanning delegated bypass.\nThis object is only honored when `security_and_analysis.secret_scanning_delegated_bypass.status` is set to `enabled`.\nYou can send this object in the same request as `secret_scanning_delegated_bypass`, or update just the options in a separate request.", Fields: map[string]Field{
-				"reviewers": {Type: "array", Description: "The bypass reviewers for secret scanning delegated bypass.\nIf you omit this field, the existing set of reviewers is unchanged."},
+				"reviewers": {Type: "array", Description: "The bypass reviewers for secret scanning delegated bypass.\nIf you omit this field, the existing set of reviewers is unchanged.", Variants: map[string]Field{
+					"": {Type: "object", Fields: map[string]Field{
+						"mode":          {Type: "string", Enum: []string{"ALWAYS", "EXEMPT"}, Description: "The bypass mode for the reviewer"},
+						"reviewer_id":   {Type: "integer", Description: "The ID of the team or role selected as a bypass reviewer"},
+						"reviewer_type": {Type: "string", Enum: []string{"ROLE", "TEAM"}, Description: "The type of the bypass reviewer"},
+					}},
+				}},
 			}},
 			"secret_scanning_non_provider_patterns": {Type: "object", Description: "Use the `status` property to enable or disable secret scanning non-provider patterns for this repository. For more information, see \"[Supported secret scanning patterns](/code-security/secret-scanning/introduction/supported-secret-scanning-patterns#supported-secrets).\"", Fields: map[string]Field{
 				"status": {Type: "string", Description: "Can be `enabled` or `disabled`."},
@@ -159,8 +165,13 @@ var generated = Node{
 					"protected_branches":     {Type: "boolean", Description: "Whether only branches with branch protection rules can deploy to this environment. If `protected_branches` is `true`, `custom_branch_policies` must be `false`; if `protected_branches` is `false`, `custom_branch_policies` must be `true`."},
 				}},
 				"prevent_self_review": {Type: "boolean", Description: "Whether or not a user who created the job is prevented from approving their own job."},
-				"reviewers":           {Type: "array", Description: "The people or teams that may review jobs that reference the environment. You can list up to six users or teams as reviewers. The reviewers must have at least read access to the repository. Only one of the required reviewers needs to approve the job for it to proceed."},
-				"wait_timer":          {Type: "integer", Description: "The amount of time to delay a job after the job is initially triggered. The time (in minutes) must be an integer between 0 and 43,200 (30 days)."},
+				"reviewers": {Type: "array", Description: "The people or teams that may review jobs that reference the environment. You can list up to six users or teams as reviewers. The reviewers must have at least read access to the repository. Only one of the required reviewers needs to approve the job for it to proceed.", Variants: map[string]Field{
+					"": {Type: "object", Fields: map[string]Field{
+						"id":   {Type: "integer", Description: "The id of the user or team who can review the deployment"},
+						"type": {Type: "string", Enum: []string{"Team", "User"}, Description: "The type of reviewer."},
+					}},
+				}},
+				"wait_timer": {Type: "integer", Description: "The amount of time to delay a job after the job is initially triggered. The time (in minutes) must be an integer between 0 and 43,200 (30 days)."},
 			},
 			Nodes: map[string]Node{
 				"variables": Node{
@@ -183,7 +194,13 @@ var generated = Node{
 			Summary: "Create a repository ruleset",
 			// from POST /repos/{owner}/{repo}/rulesets
 			Fields: map[string]Field{
-				"bypass_actors": {Type: "array", Description: "The actors that can bypass the rules in this ruleset"},
+				"bypass_actors": {Type: "array", Description: "The actors that can bypass the rules in this ruleset", Variants: map[string]Field{
+					"": {Type: "object", Description: "An actor that can bypass rules in a ruleset", Fields: map[string]Field{
+						"actor_id":    {Type: "integer", Description: "The ID of the actor that can bypass a ruleset. Required for `Integration`, `RepositoryRole`, `Team`, and `User` actor types. If `actor_type` is `OrganizationAdmin`, `actor_id` is ignored. If `actor_type` is `DeployKey`, this should be null. `OrganizationAdmin` is not applicable for personal repositories."},
+						"actor_type":  {Type: "string", Enum: []string{"DeployKey", "Integration", "OrganizationAdmin", "RepositoryRole", "Team", "User"}, Description: "The type of actor that can bypass a ruleset."},
+						"bypass_mode": {Type: "string", Enum: []string{"always", "exempt", "pull_request"}, Description: "When the specified actor can bypass the ruleset. `pull_request` means that an actor can only bypass rules on pull requests. `pull_request` is not applicable for the `DeployKey` actor type. Also, `pull_request` is only applicable to branch rulesets. When `bypass_mode` is `exempt`, rules will not be run for that actor and a bypass audit entry will not be created."},
+					}},
+				}},
 				"conditions": {Type: "object", Description: "Parameters for a repository ruleset ref name condition", Fields: map[string]Field{
 					"ref_name": {Type: "object", Fields: map[string]Field{
 						"exclude": {Type: "array", Description: "Array of ref names or patterns to exclude. The condition will not pass if any of these patterns match."},
@@ -192,8 +209,196 @@ var generated = Node{
 				}},
 				"enforcement": {Type: "string", Enum: []string{"active", "disabled", "evaluate"}, Description: "The enforcement level of the ruleset. `evaluate` allows admins to test rules before enforcing them. Admins can view insights on the Rule Insights page (`evaluate` is only available with GitHub Enterprise)."},
 				"name":        {Type: "string", Description: "The name of the ruleset."},
-				"rules":       {Type: "array", Description: "An array of rules within the ruleset."},
-				"target":      {Type: "string", Enum: []string{"branch", "push", "tag"}, Description: "The target of the ruleset"},
+				"rules": {Type: "array", Description: "An array of rules within the ruleset.", Variants: map[string]Field{
+					"branch_name_pattern": {Type: "object", Description: "Parameters to be used for the branch_name_pattern rule", Fields: map[string]Field{
+						"parameters": {Type: "object", Fields: map[string]Field{
+							"name":     {Type: "string", Description: "How this rule appears when configuring it."},
+							"negate":   {Type: "boolean", Description: "If true, the rule will fail if the pattern matches."},
+							"operator": {Type: "string", Enum: []string{"contains", "ends_with", "regex", "starts_with"}, Description: "The operator to use for matching."},
+							"pattern":  {Type: "string", Description: "The pattern to match with."},
+						}},
+						"type": {Type: "string", Enum: []string{"branch_name_pattern"}},
+					}},
+					"code_scanning": {Type: "object", Description: "Choose which tools must provide code scanning results before the reference is updated. When configured, code scanning must be enabled and have results for both the commit and the reference being updated.", Fields: map[string]Field{
+						"parameters": {Type: "object", Fields: map[string]Field{
+							"code_scanning_tools": {Type: "array", Description: "Tools that must provide code scanning results for this rule to pass.", Variants: map[string]Field{
+								"": {Type: "object", Description: "A tool that must provide code scanning results for this rule to pass.", Fields: map[string]Field{
+									"alerts_threshold":          {Type: "string", Enum: []string{"all", "errors", "errors_and_warnings", "none"}, Description: "The severity level at which code scanning results that raise alerts block a reference update. For more information on alert severity levels, see \"[About code scanning alerts](https://docs.github.com/code-security/code-scanning/managing-code-scanning-alerts/about-code-scanning-alerts#about-alert-severity-and-security-severity-levels).\""},
+									"security_alerts_threshold": {Type: "string", Enum: []string{"all", "critical", "high_or_higher", "medium_or_higher", "none"}, Description: "The severity level at which code scanning results that raise security alerts block a reference update. For more information on security severity levels, see \"[About code scanning alerts](https://docs.github.com/code-security/code-scanning/managing-code-scanning-alerts/about-code-scanning-alerts#about-alert-severity-and-security-severity-levels).\""},
+									"tool":                      {Type: "string", Description: "The name of a code scanning tool"},
+								}},
+							}},
+						}},
+						"type": {Type: "string", Enum: []string{"code_scanning"}},
+					}},
+					"commit_author_email_pattern": {Type: "object", Description: "Parameters to be used for the commit_author_email_pattern rule", Fields: map[string]Field{
+						"parameters": {Type: "object", Fields: map[string]Field{
+							"name":     {Type: "string", Description: "How this rule appears when configuring it."},
+							"negate":   {Type: "boolean", Description: "If true, the rule will fail if the pattern matches."},
+							"operator": {Type: "string", Enum: []string{"contains", "ends_with", "regex", "starts_with"}, Description: "The operator to use for matching."},
+							"pattern":  {Type: "string", Description: "The pattern to match with."},
+						}},
+						"type": {Type: "string", Enum: []string{"commit_author_email_pattern"}},
+					}},
+					"commit_message_pattern": {Type: "object", Description: "Parameters to be used for the commit_message_pattern rule", Fields: map[string]Field{
+						"parameters": {Type: "object", Fields: map[string]Field{
+							"name":     {Type: "string", Description: "How this rule appears when configuring it."},
+							"negate":   {Type: "boolean", Description: "If true, the rule will fail if the pattern matches."},
+							"operator": {Type: "string", Enum: []string{"contains", "ends_with", "regex", "starts_with"}, Description: "The operator to use for matching."},
+							"pattern":  {Type: "string", Description: "The pattern to match with."},
+						}},
+						"type": {Type: "string", Enum: []string{"commit_message_pattern"}},
+					}},
+					"committer_email_pattern": {Type: "object", Description: "Parameters to be used for the committer_email_pattern rule", Fields: map[string]Field{
+						"parameters": {Type: "object", Fields: map[string]Field{
+							"name":     {Type: "string", Description: "How this rule appears when configuring it."},
+							"negate":   {Type: "boolean", Description: "If true, the rule will fail if the pattern matches."},
+							"operator": {Type: "string", Enum: []string{"contains", "ends_with", "regex", "starts_with"}, Description: "The operator to use for matching."},
+							"pattern":  {Type: "string", Description: "The pattern to match with."},
+						}},
+						"type": {Type: "string", Enum: []string{"committer_email_pattern"}},
+					}},
+					"copilot_code_review": {Type: "object", Description: "Request Copilot code review for new pull requests automatically if the author has access to Copilot code review and their premium requests quota has not reached the limit.", Fields: map[string]Field{
+						"parameters": {Type: "object", Fields: map[string]Field{
+							"review_draft_pull_requests": {Type: "boolean", Description: "Copilot automatically reviews draft pull requests before they are marked as ready for review."},
+							"review_on_push":             {Type: "boolean", Description: "Copilot automatically reviews each new push to the pull request."},
+						}},
+						"type": {Type: "string", Enum: []string{"copilot_code_review"}},
+					}},
+					"creation": {Type: "object", Description: "Only allow users with bypass permission to create matching refs.", Fields: map[string]Field{
+						"type": {Type: "string", Enum: []string{"creation"}},
+					}},
+					"deletion": {Type: "object", Description: "Only allow users with bypass permissions to delete matching refs.", Fields: map[string]Field{
+						"type": {Type: "string", Enum: []string{"deletion"}},
+					}},
+					"file_extension_restriction": {Type: "object", Description: "Prevent commits that include files with specified file extensions from being pushed to the commit graph.", Fields: map[string]Field{
+						"parameters": {Type: "object", Fields: map[string]Field{
+							"restricted_file_extensions": {Type: "array", Description: "The file extensions that are restricted from being pushed to the commit graph."},
+						}},
+						"type": {Type: "string", Enum: []string{"file_extension_restriction"}},
+					}},
+					"file_path_restriction": {Type: "object", Description: "Prevent commits that include changes in specified file and folder paths from being pushed to the commit graph. This includes absolute paths that contain file names.", Fields: map[string]Field{
+						"parameters": {Type: "object", Fields: map[string]Field{
+							"restricted_file_paths": {Type: "array", Description: "The file paths that are restricted from being pushed to the commit graph."},
+						}},
+						"type": {Type: "string", Enum: []string{"file_path_restriction"}},
+					}},
+					"license_compliance_scanning": {Type: "object", Description: "Enforce any added or changed dependencies to comply with the organization's license policy.", Fields: map[string]Field{
+						"type": {Type: "string", Enum: []string{"license_compliance_scanning"}},
+					}},
+					"max_file_path_length": {Type: "object", Description: "Prevent commits that include file paths that exceed the specified character limit from being pushed to the commit graph.", Fields: map[string]Field{
+						"parameters": {Type: "object", Fields: map[string]Field{
+							"max_file_path_length": {Type: "integer", Description: "The maximum amount of characters allowed in file paths."},
+						}},
+						"type": {Type: "string", Enum: []string{"max_file_path_length"}},
+					}},
+					"max_file_size": {Type: "object", Description: "Prevent commits with individual files that exceed the specified limit from being pushed to the commit graph.", Fields: map[string]Field{
+						"parameters": {Type: "object", Fields: map[string]Field{
+							"max_file_size": {Type: "integer", Description: "The maximum file size allowed in megabytes. This limit does not apply to Git Large File Storage (Git LFS)."},
+						}},
+						"type": {Type: "string", Enum: []string{"max_file_size"}},
+					}},
+					"merge_queue": {Type: "object", Description: "Merges must be performed via a merge queue.", Fields: map[string]Field{
+						"parameters": {Type: "object", Fields: map[string]Field{
+							"check_response_timeout_minutes":    {Type: "integer", Description: "Maximum time for a required status check to report a conclusion. After this much time has elapsed, checks that have not reported a conclusion will be assumed to have failed"},
+							"grouping_strategy":                 {Type: "string", Enum: []string{"ALLGREEN", "HEADGREEN"}, Description: "When set to ALLGREEN, the merge commit created by merge queue for each PR in the group must pass all required checks to merge. When set to HEADGREEN, only the commit at the head of the merge group, i.e. the commit containing changes from all of the PRs in the group, must pass its required checks to merge."},
+							"max_entries_to_build":              {Type: "integer", Description: "Limit the number of queued pull requests requesting checks and workflow runs at the same time."},
+							"max_entries_to_merge":              {Type: "integer", Description: "The maximum number of PRs that will be merged together in a group."},
+							"merge_method":                      {Type: "string", Enum: []string{"MERGE", "REBASE", "SQUASH"}, Description: "Method to use when merging changes from queued pull requests."},
+							"min_entries_to_merge":              {Type: "integer", Description: "The minimum number of PRs that will be merged together in a group."},
+							"min_entries_to_merge_wait_minutes": {Type: "integer", Description: "The time merge queue should wait after the first PR is added to the queue for the minimum group size to be met. After this time has elapsed, the minimum group size will be ignored and a smaller group will be merged."},
+						}},
+						"type": {Type: "string", Enum: []string{"merge_queue"}},
+					}},
+					"non_fast_forward": {Type: "object", Description: "Prevent users with push access from force pushing to refs.", Fields: map[string]Field{
+						"type": {Type: "string", Enum: []string{"non_fast_forward"}},
+					}},
+					"pull_request": {Type: "object", Description: "Require all commits be made to a non-target branch and submitted via a pull request before they can be merged.", Fields: map[string]Field{
+						"parameters": {Type: "object", Fields: map[string]Field{
+							"allowed_merge_methods":         {Type: "array", Description: "Array of allowed merge methods. Allowed values include `merge`, `squash`, and `rebase`. At least one option must be enabled."},
+							"dismiss_stale_reviews_on_push": {Type: "boolean", Description: "New, reviewable commits pushed will dismiss previous pull request review approvals."},
+							"dismissal_restriction": {Type: "object", Description: "Specify people, teams, or apps allowed to dismiss pull request reviews.", Fields: map[string]Field{
+								"allowed_actors": {Type: "array", Description: "Specify people, teams, or apps allowed to dismiss pull request reviews.", Variants: map[string]Field{
+									"": {Type: "object", Description: "An actor allowed to dismiss pull request reviews", Fields: map[string]Field{
+										"id":   {Type: "integer", Description: "ID of the actor that can dismiss reviews."},
+										"type": {Type: "string", Enum: []string{"IntegrationInstallation", "RepositoryRole", "Team", "User"}, Description: "The type of the actor"},
+									}},
+								}},
+								"enabled": {Type: "boolean", Description: "Whether to restrict review dismissal to specific actors."},
+							}},
+							"require_code_owner_review":         {Type: "boolean", Description: "Require an approving review in pull requests that modify files that have a designated code owner."},
+							"require_last_push_approval":        {Type: "boolean", Description: "Whether the most recent reviewable push must be approved by someone other than the person who pushed it."},
+							"required_approving_review_count":   {Type: "integer", Description: "The number of approving reviews that are required before a pull request can be merged."},
+							"required_review_thread_resolution": {Type: "boolean", Description: "All conversations on code must be resolved before a pull request can be merged."},
+							"required_reviewers": {Type: "array", Description: "> [!NOTE]\n> `required_reviewers` is in beta and subject to change.\n\nA collection of reviewers and associated file patterns. Each reviewer has a list of file patterns which determine the files that reviewer is required to review.", Variants: map[string]Field{
+								"": {Type: "object", Description: "A reviewing team, and file patterns describing which files they must approve changes to.", Fields: map[string]Field{
+									"file_patterns":     {Type: "array", Description: "Array of file patterns. Pull requests which change matching files must be approved by the specified team. File patterns use fnmatch syntax."},
+									"minimum_approvals": {Type: "integer", Description: "Minimum number of approvals required from the specified team. If set to zero, the team will be added to the pull request but approval is optional."},
+									"reviewer": {Type: "object", Description: "A required reviewing team", Fields: map[string]Field{
+										"id":   {Type: "integer", Description: "ID of the reviewer which must review changes to matching files."},
+										"type": {Type: "string", Enum: []string{"Team"}, Description: "The type of the reviewer"},
+									}},
+								}},
+							}},
+						}},
+						"type": {Type: "string", Enum: []string{"pull_request"}},
+					}},
+					"required_deployments": {Type: "object", Description: "Choose which environments must be successfully deployed to before refs can be pushed into a ref that matches this rule.", Fields: map[string]Field{
+						"parameters": {Type: "object", Fields: map[string]Field{
+							"required_deployment_environments": {Type: "array", Description: "The environments that must be successfully deployed to before branches can be merged."},
+						}},
+						"type": {Type: "string", Enum: []string{"required_deployments"}},
+					}},
+					"required_linear_history": {Type: "object", Description: "Prevent merge commits from being pushed to matching refs.", Fields: map[string]Field{
+						"type": {Type: "string", Enum: []string{"required_linear_history"}},
+					}},
+					"required_signatures": {Type: "object", Description: "Commits pushed to matching refs must have verified signatures.", Fields: map[string]Field{
+						"type": {Type: "string", Enum: []string{"required_signatures"}},
+					}},
+					"required_status_checks": {Type: "object", Description: "Choose which status checks must pass before the ref is updated. When enabled, commits must first be pushed to another ref where the checks pass.", Fields: map[string]Field{
+						"parameters": {Type: "object", Fields: map[string]Field{
+							"do_not_enforce_on_create": {Type: "boolean", Description: "Allow repositories and branches to be created if a check would otherwise prohibit it."},
+							"required_status_checks": {Type: "array", Description: "Status checks that are required.", Variants: map[string]Field{
+								"": {Type: "object", Description: "Required status check", Fields: map[string]Field{
+									"context":        {Type: "string", Description: "The status check context name that must be present on the commit."},
+									"integration_id": {Type: "integer", Description: "The optional integration ID that this status check must originate from."},
+								}},
+							}},
+							"strict_required_status_checks_policy": {Type: "boolean", Description: "Whether pull requests targeting a matching branch must be tested with the latest code. This setting will not take effect unless at least one status check is enabled."},
+						}},
+						"type": {Type: "string", Enum: []string{"required_status_checks"}},
+					}},
+					"tag_name_pattern": {Type: "object", Description: "Parameters to be used for the tag_name_pattern rule", Fields: map[string]Field{
+						"parameters": {Type: "object", Fields: map[string]Field{
+							"name":     {Type: "string", Description: "How this rule appears when configuring it."},
+							"negate":   {Type: "boolean", Description: "If true, the rule will fail if the pattern matches."},
+							"operator": {Type: "string", Enum: []string{"contains", "ends_with", "regex", "starts_with"}, Description: "The operator to use for matching."},
+							"pattern":  {Type: "string", Description: "The pattern to match with."},
+						}},
+						"type": {Type: "string", Enum: []string{"tag_name_pattern"}},
+					}},
+					"update": {Type: "object", Description: "Only allow users with bypass permission to update matching refs.", Fields: map[string]Field{
+						"parameters": {Type: "object", Fields: map[string]Field{
+							"update_allows_fetch_and_merge": {Type: "boolean", Description: "Branch can pull changes from its upstream repository"},
+						}},
+						"type": {Type: "string", Enum: []string{"update"}},
+					}},
+					"workflows": {Type: "object", Description: "Require all changes made to a targeted branch to pass the specified workflows before they can be merged.", Fields: map[string]Field{
+						"parameters": {Type: "object", Fields: map[string]Field{
+							"do_not_enforce_on_create": {Type: "boolean", Description: "Allow repositories and branches to be created if a check would otherwise prohibit it."},
+							"workflows": {Type: "array", Description: "Workflows that must pass for this rule to pass.", Variants: map[string]Field{
+								"": {Type: "object", Description: "A workflow that must run for this rule to pass", Fields: map[string]Field{
+									"path":          {Type: "string", Description: "The path to the workflow file"},
+									"ref":           {Type: "string", Description: "The ref (branch or tag) of the workflow file to use"},
+									"repository_id": {Type: "integer", Description: "The ID of the repository where the workflow is defined"},
+									"sha":           {Type: "string", Description: "The commit SHA of the workflow file to use"},
+								}},
+							}},
+						}},
+						"type": {Type: "string", Enum: []string{"workflows"}},
+					}},
+				}},
+				"target": {Type: "string", Enum: []string{"branch", "push", "tag"}, Description: "The target of the ruleset"},
 			},
 		},
 	},
