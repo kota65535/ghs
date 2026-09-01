@@ -1,38 +1,30 @@
 {
   $schema: 'https://docs.renovatebot.com/renovate-schema.json',
-
-  // Updates merge themselves here. The branch protection on main is what
-  // decides whether they may: Renovate hands the merge to GitHub's own
-  // auto-merge, which fires as soon as a pull request is mergeable, so the
-  // required status checks are the only thing standing between an update and
-  // the release it triggers.
   extends: [
-    // What the Renovate maintainers recommend over config:recommended. Most
-    // of what it adds is npm-only and inert in a Go repository; the part that
-    // matters is pinning the GitHub Actions this repository runs to a commit
-    // digest, so a moved tag cannot change what the release workflow executes.
     'config:best-practices',
-
-    // Minor and patch, but only for packages past 1.0. Under semver a minor
-    // bump of a 0.x package is allowed to break, so it gets read first.
     ':automergeStableNonMajor',
-
-    // How the API description below merges itself: git-refs updates arrive as
-    // a digest, not a version. Also covers the pinned Actions digests.
     ':automergeDigest',
-
-    // The limits exist to stop a queue of pull requests growing faster than
-    // anyone can review it. Nothing queues up when they merge themselves.
     ':disableRateLimiting',
-
-    // Labels are what makes these findable afterwards, since most of them
-    // merge without anyone reading them.
     ':enableVulnerabilityAlertsWithLabel(security)',
     ':labels(dependencies)',
   ],
 
   customManagers: [
     {
+      // gen/openapi.ref holds one bare commit of github/rest-api-description
+      // and nothing a packaged manager recognises, so it takes a regex one.
+      //
+      // github/rest-api-description publishes no releases, which is why the
+      // dependency is a URL rather than a package name and the datasource is
+      // git-refs: there is no version to compare, only the commit that the
+      // branch named in currentValueTemplate points at today. Capturing it as
+      // currentDigest is what makes Renovate rewrite the file in place, and
+      // what files the update as a digest -- the type :automergeDigest above
+      // lets through on its own.
+      //
+      // Moving the commit leaves internal/schema/nodes_gen.go generated from
+      // the old description; the codegen workflow regenerates it on the branch
+      // before the checks decide whether the update may merge.
       customType: 'regex',
       description: 'Keep the pinned GitHub OpenAPI description current; run go generate ./... after it updates',
       managerFilePatterns: ['/^gen/openapi\\.ref$/'],
