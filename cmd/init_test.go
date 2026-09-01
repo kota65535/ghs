@@ -209,3 +209,74 @@ func TestGenerateDeclaresAnEmptyCollection(t *testing.T) {
 		t.Errorf("want an empty rulesets declaration, got:\n%s", got)
 	}
 }
+
+// TestGenerateWritesWhatEachRuleIsFor checks the commentary of a ruleset rule,
+// which the description states per rule type rather than for a rule in general:
+// a rule is written under what it does, and its parameters under what they
+// mean.
+//
+// A parameter the description does not have is left out. What init writes has
+// to be a file plan accepts, and both read the same definition.
+func TestGenerateWritesWhatEachRuleIsFor(t *testing.T) {
+	client := &fakeClient{reads: map[string]string{
+		"repos/kota65535/ghs/rulesets": `[{"id": 42, "name": "main"}]`,
+		"repos/kota65535/ghs/rulesets/42": `{"id": 42, "name": "main", "target": "branch",
+			"enforcement": "active",
+			"rules": [
+				{"type": "pull_request", "parameters": {"required_approving_review_count": 2, "a_brand_new_parameter": true}}
+			]}`,
+	}}
+
+	settings, err := generate(context.Background(), client, testRepo, []string{"rulesets"})
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	got := string(settings)
+
+	for _, want := range []string{
+		// What the rule is, above the element it opens.
+		"- # Require all commits be made to a non-target branch and submitted via a pull request",
+		// What one of its parameters is, above the parameter itself.
+		"# The number of approving reviews that are required before a pull request can be merged.\n" +
+			"          required_approving_review_count: 2",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("generated file is missing:\n%s\ngot:\n%s", want, got)
+		}
+	}
+
+	// A parameter of a known rule type that the description does not have.
+	// Writing it would put a line in the file that plan then refuses to load.
+	if strings.Contains(got, "a_brand_new_parameter") {
+		t.Errorf("generated file holds a parameter plan would reject:\n%s", got)
+	}
+
+	if _, err := config.Parse(settings); err != nil {
+		t.Errorf("generated file does not parse: %v\n%s", err, got)
+	}
+}
+
+// TestGenerateStopsAtARuleTypeItDoesNotKnow checks what init does with a rule
+// it cannot describe, which is to refuse rather than guess.
+//
+// Writing the rule as it was reported would produce a file plan refuses to
+// load, and leaving it out would drop a rule that exists from the file, which
+// apply reads as a rule to delete. Neither is something to do quietly.
+func TestGenerateStopsAtARuleTypeItDoesNotKnow(t *testing.T) {
+	client := &fakeClient{reads: map[string]string{
+		"repos/kota65535/ghs/rulesets": `[{"id": 42, "name": "main"}]`,
+		"repos/kota65535/ghs/rulesets/42": `{"id": 42, "name": "main", "target": "branch",
+			"rules": [{"type": "a_rule_from_the_future"}]}`,
+	}}
+
+	_, err := generate(context.Background(), client, testRepo, []string{"rulesets"})
+	if err == nil {
+		t.Fatal("generate succeeded, want the unknown rule type reported")
+	}
+	if !strings.Contains(err.Error(), "a_rule_from_the_future") {
+		t.Errorf("err = %v, want the rule type named", err)
+	}
+	if !strings.Contains(err.Error(), "update ghs") {
+		t.Errorf("err = %v, want it to say what to do about it", err)
+	}
+}

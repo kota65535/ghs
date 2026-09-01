@@ -340,6 +340,12 @@ func fieldsNode(key string, fields map[string]schema.Field, current map[string]a
 				continue
 			}
 			rendered = filtered
+		} else if items, ok := value.([]any); ok && len(field.Variants) > 0 {
+			filtered, err := elementsNode(join(key, name), items, field, describe)
+			if err != nil {
+				return nil, err
+			}
+			rendered = filtered
 		} else if err := rendered.Encode(value); err != nil {
 			return nil, fmt.Errorf("render %s: %w", join(key, name), err)
 		}
@@ -354,6 +360,67 @@ func fieldsNode(key string, fields map[string]schema.Field, current map[string]a
 	}
 
 	return out, nil
+}
+
+// elementsNode renders the elements of an array against what the description
+// says an element may be, which is the same filtering the fields of an object
+// get: a ruleset rule declares a type, and that says which parameters it takes
+// and what each of them is for.
+//
+// This is what puts `required_approving_review_count: 2` under the sentence
+// saying what it means, and it is also what keeps the file loadable: a
+// parameter written here is one plan accepts, since both are read from the
+// same definition.
+//
+// An element the description has nothing to say about stops init rather than
+// being written as it was reported or filtered down to nothing. Writing it
+// would produce a file plan refuses to load, and filtering it would drop a rule
+// from the file, which apply then reads as a rule to delete.
+func elementsNode(key string, items []any, field schema.Field, describe bool) (*yaml.Node, error) {
+	out := &yaml.Node{Kind: yaml.SequenceNode}
+
+	for _, item := range items {
+		element, isMapping := item.(map[string]any)
+		if !isMapping {
+			return nil, fmt.Errorf("%s: expected a mapping, got %T", key, item)
+		}
+		variant, known := field.Variant(element)
+		if !known {
+			return nil, fmt.Errorf("%s: %v is not a type ghs knows; update ghs and run init again",
+				key, element["type"])
+		}
+
+		rendered, err := fieldsNode(key, variant.Fields, element, describe)
+		if err != nil {
+			return nil, err
+		}
+		// What the element as a whole is goes above its first key, which is the
+		// line that opens the element.
+		if describe && variant.Description != "" && len(rendered.Content) > 0 {
+			first := rendered.Content[0]
+			first.HeadComment = joinComments(comment(variant.Description), first.HeadComment)
+		}
+		out.Content = append(out.Content, rendered)
+	}
+
+	return out, nil
+}
+
+// joinComments puts two comment bodies one above the other, dropping the ones
+// that are empty.
+//
+// They run together rather than being kept apart by a blank line, for the
+// reason the paragraphs of one description do: a blank line inside a comment is
+// a blank line in the file, and the file keeps those for what a setting is
+// written about, not for a break within it.
+func joinComments(comments ...string) string {
+	var present []string
+	for _, c := range comments {
+		if c != "" {
+			present = append(present, c)
+		}
+	}
+	return strings.Join(present, "\n")
 }
 
 // put writes one key of a mapping, with the comment that belongs above it.

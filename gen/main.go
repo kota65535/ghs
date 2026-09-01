@@ -184,6 +184,7 @@ type field struct {
 	Enum        []string
 	Description string
 	Fields      map[string]field
+	Variants    map[string]field
 }
 
 // node mirrors schema.Node during generation.
@@ -475,7 +476,63 @@ func (c converter) field(m map[string]any, seen []string) field {
 	if nested, ok := m["properties"].(map[string]any); ok && len(nested) > 0 {
 		f.Fields = c.properties(nested, seen)
 	}
+	// What the elements of an array may be is recorded for the same reason,
+	// except that it is not validated against: an array is passed through as
+	// it is written, and this is only what the description says about it.
+	if items, ok := m["items"].(map[string]any); ok {
+		f.Variants = c.variants(items, seen)
+	}
 	return f
+}
+
+// variants describes what an element of an array may be.
+//
+// The alternatives of a oneOf are kept apart rather than merged, because which
+// of them applies is a question the element itself answers: a ruleset rule
+// declares a type, and what it accepts follows from that. Each alternative is
+// titled with the value that selects it, so that is what it is keyed by.
+//
+// An array of one shape is keyed by the empty string, and an array of scalars
+// describes nothing and is left nil.
+func (c converter) variants(items map[string]any, seen []string) map[string]field {
+	items, seen, ok := c.resolve(items, seen)
+	if !ok {
+		return nil
+	}
+
+	alternatives, isOneOf := items["oneOf"].([]any)
+	if !isOneOf {
+		f := c.field(items, seen)
+		if len(f.Fields) == 0 {
+			return nil
+		}
+		return map[string]field{"": f}
+	}
+
+	out := make(map[string]field, len(alternatives))
+	for _, raw := range alternatives {
+		m, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		// Each alternative gets the refs followed so far and none of what its
+		// siblings followed, since they legitimately share schemas.
+		alternative, alternativeSeen, ok := c.resolve(m, seen)
+		if !ok {
+			continue
+		}
+		// The title is the value of the type field that selects this
+		// alternative. Without one there is no way to tell when it applies.
+		title, _ := alternative["title"].(string)
+		if title == "" {
+			continue
+		}
+		out[title] = c.field(alternative, alternativeSeen)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 // resolve follows a chain of $ref until it reaches a schema, reporting false
@@ -538,33 +595,50 @@ func writeFields(b *strings.Builder, fields map[string]field, depth int) {
 	sort.Strings(names)
 
 	for _, name := range names {
-		f := fields[name]
-		fmt.Fprintf(b, "%s\t%q: {", indent, name)
-
-		var parts []string
-		if f.Type != "" {
-			parts = append(parts, fmt.Sprintf("Type: %q", f.Type))
-		}
-		if len(f.Enum) > 0 {
-			quoted := make([]string, len(f.Enum))
-			for i, v := range f.Enum {
-				quoted[i] = fmt.Sprintf("%q", v)
-			}
-			parts = append(parts, fmt.Sprintf("Enum: []string{%s}", strings.Join(quoted, ", ")))
-		}
-		if f.Description != "" {
-			parts = append(parts, fmt.Sprintf("Description: %q", f.Description))
-		}
-		fmt.Fprintf(b, "%s", strings.Join(parts, ", "))
-
-		if len(f.Fields) > 0 {
-			if len(parts) > 0 {
-				fmt.Fprintf(b, ", ")
-			}
-			fmt.Fprintf(b, "Fields: ")
-			writeFields(b, f.Fields, depth+2)
-		}
-		fmt.Fprintf(b, "},\n")
+		fmt.Fprintf(b, "%s\t%q: ", indent, name)
+		writeField(b, fields[name], depth+1)
+		fmt.Fprintf(b, ",\n")
 	}
 	fmt.Fprintf(b, "%s}", indent)
+}
+
+func writeField(b *strings.Builder, f field, depth int) {
+	fmt.Fprintf(b, "{")
+
+	var parts []string
+	if f.Type != "" {
+		parts = append(parts, fmt.Sprintf("Type: %q", f.Type))
+	}
+	if len(f.Enum) > 0 {
+		quoted := make([]string, len(f.Enum))
+		for i, v := range f.Enum {
+			quoted[i] = fmt.Sprintf("%q", v)
+		}
+		parts = append(parts, fmt.Sprintf("Enum: []string{%s}", strings.Join(quoted, ", ")))
+	}
+	if f.Description != "" {
+		parts = append(parts, fmt.Sprintf("Description: %q", f.Description))
+	}
+	fmt.Fprintf(b, "%s", strings.Join(parts, ", "))
+	written := len(parts) > 0
+
+	for _, nested := range []struct {
+		name   string
+		fields map[string]field
+	}{
+		{"Fields", f.Fields},
+		{"Variants", f.Variants},
+	} {
+		if len(nested.fields) == 0 {
+			continue
+		}
+		if written {
+			fmt.Fprintf(b, ", ")
+		}
+		fmt.Fprintf(b, "%s: ", nested.name)
+		writeFields(b, nested.fields, depth+1)
+		written = true
+	}
+
+	fmt.Fprintf(b, "}")
 }

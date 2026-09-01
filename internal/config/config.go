@@ -249,6 +249,44 @@ func validateValue(path string, value any, field schema.Field) []string {
 		problems = append(problems, validateFields(path, nested, field.Fields)...)
 	}
 
+	if items, ok := value.([]any); ok && len(field.Variants) > 0 {
+		problems = append(problems, validateElements(path, items, field)...)
+	}
+
+	return problems
+}
+
+// validateElements checks the elements of an array against what the
+// description says an element may be, which is a question the element answers
+// for itself: a ruleset rule declares a type, and which parameters it accepts
+// follows from that.
+//
+// A type the description does not have is rejected like any other value that is
+// not one of the accepted ones. GitHub adds rule types between releases, so this
+// is a rule type ghs does not know yet rather than one that does not exist, and
+// the answer is the same either way: the pinned API description is followed
+// daily, so what ghs does not know it does not know for long.
+func validateElements(path string, items []any, field schema.Field) []string {
+	var problems []string
+
+	for i, item := range items {
+		elementPath := fmt.Sprintf("%s[%d]", path, i)
+
+		element, ok := item.(map[string]any)
+		if !ok {
+			problems = append(problems, fmt.Sprintf("%s: expected a mapping", elementPath))
+			continue
+		}
+
+		variant, known := field.Variant(element)
+		if !known {
+			problems = append(problems, fmt.Sprintf("%s.type: %s is not one of %s",
+				elementPath, formatScalar(element["type"]), strings.Join(sortedKeys(field.Variants), ", ")))
+			continue
+		}
+		problems = append(problems, validateFields(elementPath, element, variant.Fields)...)
+	}
+
 	return problems
 }
 
