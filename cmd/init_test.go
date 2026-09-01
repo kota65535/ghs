@@ -280,3 +280,29 @@ func TestGenerateStopsAtARuleTypeItDoesNotKnow(t *testing.T) {
 		t.Errorf("err = %v, want it to say what to do about it", err)
 	}
 }
+
+// TestGenerateWritesNumbersAsNumbers checks that the whole numbers the API
+// reports are written as integers however deep they sit, rather than as the
+// float64 JSON decoding leaves them: an actor id spelled 1.312304e+06 is not
+// the id the API reported.
+func TestGenerateWritesNumbersAsNumbers(t *testing.T) {
+	client := &fakeClient{reads: map[string]string{
+		"repos/kota65535/ghs/rulesets": `[{"id": 7, "name": "protect-main"}]`,
+		"repos/kota65535/ghs/rulesets/7": `{"id": 7, "name": "protect-main", "target": "branch",
+			"enforcement": "active",
+			"bypass_actors": [{"actor_id": 1312304, "actor_type": "Integration", "bypass_mode": "always"}]}`,
+	}}
+
+	settings, err := generate(context.Background(), client, testRepo, []string{"rulesets"})
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+
+	got := string(settings)
+	if !strings.Contains(got, "actor_id: 1312304") {
+		t.Errorf("want the actor id written as an integer, got:\n%s", got)
+	}
+	if strings.Contains(got, "e+06") {
+		t.Errorf("the actor id is written in exponent notation:\n%s", got)
+	}
+}
