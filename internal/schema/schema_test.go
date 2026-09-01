@@ -123,6 +123,11 @@ func TestConditionalPathsAreMarked(t *testing.T) {
 	if !at(t, "actions", "permissions", "selected-actions").Conditional {
 		t.Error("selected-actions is not marked conditional")
 	}
+	// The fork PR approval policy is answered with 422 where a repository has
+	// no fork pull requests to approve, which is the same thing.
+	if !at(t, "actions", "permissions", "fork-pr-contributor-approval").Conditional {
+		t.Error("fork-pr-contributor-approval is not marked conditional")
+	}
 	if at(t, "actions", "permissions").Conditional {
 		t.Error("permissions is marked conditional, want it always present")
 	}

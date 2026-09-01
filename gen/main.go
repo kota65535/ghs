@@ -64,7 +64,7 @@ var operations = []operation{
 	{key: []string{"actions", "variables"}, path: "/repos/{owner}/{repo}/actions/variables", method: "post", kind: "KindCollection"},
 	{key: []string{"actions", "permissions"}, path: "/repos/{owner}/{repo}/actions/permissions", method: "put", kind: "KindObject"},
 	{key: []string{"actions", "permissions", "workflow"}, path: "/repos/{owner}/{repo}/actions/permissions/workflow", method: "put", kind: "KindObject"},
-	{key: []string{"actions", "permissions", "fork-pr-contributor-approval"}, path: "/repos/{owner}/{repo}/actions/permissions/fork-pr-contributor-approval", method: "put", kind: "KindObject"},
+	{key: []string{"actions", "permissions", "fork-pr-contributor-approval"}, path: "/repos/{owner}/{repo}/actions/permissions/fork-pr-contributor-approval", method: "put", kind: "KindObject", conditional: true},
 	{key: []string{"actions", "permissions", "selected-actions"}, path: "/repos/{owner}/{repo}/actions/permissions/selected-actions", method: "put", kind: "KindObject", conditional: true},
 	{key: []string{"actions", "permissions", "artifact-and-log-retention"}, path: "/repos/{owner}/{repo}/actions/permissions/artifact-and-log-retention", method: "put", kind: "KindObject"},
 }
