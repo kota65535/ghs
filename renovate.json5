@@ -1,0 +1,37 @@
+{
+  $schema: 'https://docs.renovatebot.com/renovate-schema.json',
+  extends: [
+    'config:best-practices',
+    ':automergeStableNonMajor',
+    ':automergeDigest',
+    ':disableRateLimiting',
+    ':enableVulnerabilityAlertsWithLabel(security)',
+    ':labels(dependencies)',
+  ],
+
+  customManagers: [
+    {
+      // gen/openapi.ref holds one bare commit of github/rest-api-description
+      // and nothing a packaged manager recognises, so it takes a regex one.
+      //
+      // github/rest-api-description publishes no releases, which is why the
+      // dependency is a URL rather than a package name and the datasource is
+      // git-refs: there is no version to compare, only the commit that the
+      // branch named in currentValueTemplate points at today. Capturing it as
+      // currentDigest is what makes Renovate rewrite the file in place, and
+      // what files the update as a digest -- the type :automergeDigest above
+      // lets through on its own.
+      //
+      // Moving the commit leaves internal/schema/nodes_gen.go generated from
+      // the old description; the codegen workflow regenerates it on the branch
+      // before the checks decide whether the update may merge.
+      customType: 'regex',
+      description: 'Keep the pinned GitHub OpenAPI description current; run go generate ./... after it updates',
+      managerFilePatterns: ['/^gen/openapi\\.ref$/'],
+      matchStrings: ['(?<currentDigest>[a-f0-9]{40})'],
+      depNameTemplate: 'https://github.com/github/rest-api-description',
+      currentValueTemplate: 'main',
+      datasourceTemplate: 'git-refs',
+    },
+  ],
+}
