@@ -1,0 +1,37 @@
+name: autotag
+
+# A refreshed API description changes what ghs knows about, so every merge that
+# touches the generator input ships as a patch release. Tagging with a personal
+# access token is what lets the tag push start the release workflow -- a tag
+# pushed with the built-in GITHUB_TOKEN would not.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - gen/**
+      - internal/schema/fields_gen.go
+
+permissions:
+  contents: read
+
+concurrency:
+  group: autotag
+
+jobs:
+  tag:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # The tag history is what the next version is derived from.
+          fetch-depth: 0
+          token: ${{ secrets.RELEASE_TOKEN }}
+
+      - name: Tag the next patch version
+        run: |
+          latest=$(git describe --tags --abbrev=0 --match 'v[0-9]*' 2>/dev/null || echo v0.0.0)
+          next=$(echo "$latest" | awk -F. -v OFS=. '{ $3 += 1; print }')
+          echo "Releasing $next (previous: $latest)"
+          git tag "$next"
+          git push origin "$next"

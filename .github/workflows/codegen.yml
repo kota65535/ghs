@@ -28,6 +28,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          # Renovate only moves the pinned commit; the regenerated output has to
+          # be pushed back onto its branch, and only a personal access token
+          # makes that push retrigger the checks the auto-merge waits on.
+          token: ${{ github.actor == 'renovate[bot]' && secrets.RELEASE_TOKEN || github.token }}
+          ref: ${{ github.event.pull_request.head.ref }}
 
       - uses: actions/setup-go@v7
         with:
@@ -35,6 +41,17 @@ jobs:
 
       - name: Regenerate
         run: go generate ./...
+
+      - name: Commit the regenerated output onto the Renovate branch
+        if: github.event_name == 'pull_request' && github.actor == 'renovate[bot]'
+        run: |
+          if git diff --quiet; then
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -am 'chore: regenerate the field definitions'
+          git push
 
       - name: Check the committed output matches
         run: |

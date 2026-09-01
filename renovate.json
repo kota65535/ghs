@@ -1,6 +1,14 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": ["config:recommended"],
+  "packageRules": [
+    {
+      "description": "Ship a refreshed API description on its own; codegen regenerates the field definitions on the branch first",
+      "matchDepNames": ["https://github.com/github/rest-api-description"],
+      "automerge": true,
+      "automergeType": "pr"
+    }
+  ],
   "customManagers": [
     {
       "customType": "regex",
