@@ -3,7 +3,8 @@
   "extends": [
     "config:best-practices",
     ":automergeStableNonMajor",
-    ":automergeDigest"
+    ":automergeDigest",
+    ":disableRateLimiting"
   ],
   "customManagers": [
     {
