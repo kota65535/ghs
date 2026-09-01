@@ -3,8 +3,8 @@
   "extends": ["config:recommended"],
   "packageRules": [
     {
-      "description": "Ship a refreshed API description on its own; codegen regenerates the field definitions on the branch first",
-      "matchDepNames": ["https://github.com/github/rest-api-description"],
+      "description": "Merge anything short of a major version once the checks pass. A refreshed API description arrives as a digest update, and codegen regenerates the node definitions on the branch before the checks run.",
+      "matchUpdateTypes": ["minor", "patch", "pin", "digest"],
       "automerge": true,
       "automergeType": "pr"
     }
