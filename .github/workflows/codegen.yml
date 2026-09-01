@@ -21,7 +21,7 @@ jobs:
   verify:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           # Renovate only moves the pinned commit; the regenerated output has to
           # be pushed back onto its branch, and only a personal access token
@@ -29,7 +29,7 @@ jobs:
           token: ${{ github.actor == 'renovate[bot]' && secrets.RELEASE_TOKEN || github.token }}
           ref: ${{ github.event.pull_request.head.ref }}
 
-      - uses: actions/setup-go@v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
           go-version-file: go.mod
 
