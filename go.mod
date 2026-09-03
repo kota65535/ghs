@@ -4,7 +4,7 @@ go 1.26.1
 
 require (
 	github.com/charmbracelet/huh v1.0.0
-	github.com/cli/go-gh/v2 v2.15.0
+	github.com/cli/go-gh/v2 v2.16.0
 	github.com/spf13/cobra v1.10.2
 	gopkg.in/yaml.v3 v3.0.1
 )
