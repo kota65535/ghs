@@ -359,7 +359,7 @@ func unpad(label string) string {
 }
 
 func renderMarkdown(w io.Writer, plan *Plan) error {
-	if _, err := fmt.Fprintln(w, "### ghs plan"); err != nil {
+	if _, err := fmt.Fprintln(w, "## ghs plan"); err != nil {
 		return err
 	}
 	if plan == nil {
