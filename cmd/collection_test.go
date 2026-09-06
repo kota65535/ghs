@@ -5,6 +5,8 @@ import (
 	"context"
 	"strings"
 	"testing"
+
+	"github.com/kota65535/ghs/internal/diff"
 )
 
 func TestApplyACollection(t *testing.T) {
@@ -28,7 +30,7 @@ actions:
 `)
 
 	var out bytes.Buffer
-	if err := apply(context.Background(), &out, p); err != nil {
+	if err := apply(context.Background(), &out, p, diff.FormatText); err != nil {
 		t.Fatalf("apply: %v", err)
 	}
 
@@ -57,7 +59,6 @@ actions:
 		`          name:  "CHANGE"`,
 		`        ~ value: "old" -> "new"`,
 		`        - name:  "GONE"`,
-		"Plan: 1 to create, 1 to change, 1 to delete.",
 		"Apply complete. 1 created, 1 changed, 1 deleted.",
 	} {
 		if !strings.Contains(output, want) {
@@ -93,7 +94,7 @@ environments:
 `)
 
 	var out bytes.Buffer
-	if err := apply(context.Background(), &out, p); err != nil {
+	if err := apply(context.Background(), &out, p, diff.FormatText); err != nil {
 		t.Fatalf("apply: %v", err)
 	}
 
@@ -137,7 +138,7 @@ environments:
 `)
 
 	var out bytes.Buffer
-	if err := apply(context.Background(), &out, p); err != nil {
+	if err := apply(context.Background(), &out, p, diff.FormatText); err != nil {
 		t.Fatalf("apply: %v", err)
 	}
 
@@ -167,7 +168,7 @@ func TestDeclaringAnEmptyCollectionDeletesEverything(t *testing.T) {
 	p := planFor(t, client, "actions:\n  variables: []\n")
 
 	var out bytes.Buffer
-	if err := apply(context.Background(), &out, p); err != nil {
+	if err := apply(context.Background(), &out, p, diff.FormatText); err != nil {
 		t.Fatalf("apply: %v", err)
 	}
 
@@ -212,7 +213,7 @@ func TestApplyStopsAtTheFirstFailure(t *testing.T) {
 	p := planFor(t, client, "actions:\n  variables:\n    - name: ADD\n      value: fresh\n")
 
 	var out bytes.Buffer
-	if err := apply(context.Background(), &out, p); err == nil {
+	if err := apply(context.Background(), &out, p, diff.FormatText); err == nil {
 		t.Fatal("apply succeeded, want the API failure reported")
 	}
 	// The delete must not have gone out: a failed create leaves the settings

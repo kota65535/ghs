@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"context"
-	"fmt"
 	"io"
 	"os"
 
@@ -14,7 +13,9 @@ import (
 )
 
 func newApplyCommand(global *globalOptions) *cobra.Command {
-	return &cobra.Command{
+	var format string
+
+	cmd := &cobra.Command{
 		Use:   "apply",
 		Short: "Apply the settings file to the repository",
 		Long: "apply brings the repository's settings in line with the settings file.\n\n" +
@@ -26,35 +27,34 @@ func newApplyCommand(global *globalOptions) *cobra.Command {
 			"deleted.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			f, err := diff.ParseFormat(format)
+			if err != nil {
+				return err
+			}
+
 			p, err := build(cmd.Context(), global)
 			if err != nil {
 				return err
 			}
-			return apply(cmd.Context(), cmd.OutOrStdout(), p)
+			return apply(cmd.Context(), cmd.OutOrStdout(), p, f)
 		},
 	}
+
+	cmd.Flags().StringVar(&format, "format", string(diff.FormatText), "output format: text, markdown or json")
+
+	return cmd
 }
 
-func apply(ctx context.Context, w io.Writer, p plans) error {
+// apply writes the difference in the requested format, with the settings sent
+// between the changes and the summary.
+func apply(ctx context.Context, w io.Writer, p plans, format diff.Format) error {
 	var opts []diff.Option
-	if isTerminal(os.Stdout) {
+	if format == diff.FormatText && isTerminal(os.Stdout) {
 		opts = append(opts, diff.WithColor())
 	}
-	if err := diff.Render(w, p.plan, diff.FormatText, opts...); err != nil {
-		return err
-	}
-
-	summary := p.plan.Summarize()
-	if summary.Total() == 0 {
-		return nil
-	}
-
-	if err := applyNode(ctx, p.client, "", p.declared, p.plan, resource.At(p.repo)); err != nil {
-		return err
-	}
-
-	fmt.Fprintf(w, "\nApply complete. %s.\n", summary.Done())
-	return nil
+	return diff.Perform(w, p.plan, format, func() error {
+		return applyNode(ctx, p.client, "", p.declared, p.plan, resource.At(p.repo))
+	}, opts...)
 }
 
 // applyNode writes one node of the settings file and everything below it,

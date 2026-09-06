@@ -267,7 +267,7 @@ jobs:
 ```
 ghs init [flags]     write a settings file from the current settings
 ghs plan [flags]     show what apply would change
-ghs apply [flags]    apply the settings file
+ghs apply [flags]    apply the settings file (--format text|markdown|json)
 ```
 
 | Flag | |

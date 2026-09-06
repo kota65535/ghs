@@ -50,23 +50,63 @@ func WithColor() Option {
 	return func(o *renderOptions) { o.color = true }
 }
 
-// Render writes the plan in the requested format.
+// Render writes the plan in the requested format, summarized as work to do.
 func Render(w io.Writer, plan *Plan, format Format, opts ...Option) error {
+	return Perform(w, plan, format, nil, opts...)
+}
+
+// Perform writes the plan, carries out act between the changes and the
+// summary, and words the summary as work done rather than work to do.
+//
+// The changes go out before act runs, so what is about to be done is on record
+// even if act fails part way through. The JSON format is one document and
+// cannot be split, so it is written whole once act has finished. act is not
+// called when nothing differs, and a nil act leaves the plan as a plan.
+func Perform(w io.Writer, plan *Plan, format Format, act func() error, opts ...Option) error {
 	var options renderOptions
 	for _, opt := range opts {
 		opt(&options)
 	}
 
 	plan = plan.Prune()
+	summary := plan.Summarize()
 
-	switch format {
-	case FormatMarkdown:
-		return renderMarkdown(w, plan)
-	case FormatJSON:
-		return renderJSON(w, plan)
-	default:
-		return renderText(w, plan, options)
+	if act != nil && plan == nil {
+		act = nil
 	}
+
+	if format == FormatJSON {
+		if act != nil {
+			if err := act(); err != nil {
+				return err
+			}
+		}
+		return renderJSON(w, plan)
+	}
+
+	var err error
+	if format == FormatMarkdown {
+		err = renderMarkdown(w, plan)
+	} else {
+		err = renderText(w, plan, options)
+	}
+	if err != nil || plan == nil {
+		return err
+	}
+
+	footer := "Plan: " + summary.String()
+	if act != nil {
+		if err := act(); err != nil {
+			return err
+		}
+		footer = "Apply complete. " + summary.Done()
+	}
+	if format == FormatMarkdown {
+		_, err = fmt.Fprintf(w, "\n**%s.**\n", footer)
+	} else {
+		_, err = fmt.Fprintf(w, "\n%s.\n", footer)
+	}
+	return err
 }
 
 const (
@@ -114,11 +154,7 @@ func renderText(w io.Writer, plan *Plan, options renderOptions) error {
 		return err
 	}
 
-	if err := writeBody(w, plan, "", options); err != nil {
-		return err
-	}
-	_, err := fmt.Fprintf(w, "\nPlan: %s.\n", plan.Summarize())
-	return err
+	return writeBody(w, plan, "", options)
 }
 
 // writeBody writes a node's own changes and then the nodes below it, which is
@@ -379,9 +415,7 @@ func renderMarkdown(w io.Writer, plan *Plan) error {
 			return err
 		}
 	}
-
-	_, err := fmt.Fprintf(w, "\n**Plan: %s.**\n", plan.Summarize())
-	return err
+	return nil
 }
 
 // cell wraps a value in a code span that survives a table.
