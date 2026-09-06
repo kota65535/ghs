@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -225,6 +227,31 @@ func TestApplyReportsAPIFailure(t *testing.T) {
 	var out bytes.Buffer
 	if err := apply(context.Background(), &out, p); err == nil {
 		t.Fatal("apply succeeded, want the API failure reported")
+	}
+}
+
+func TestSettingsPath(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, ".git"), []byte("gitdir: elsewhere\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	nested := filepath.Join(root, "a", "b")
+	if err := os.MkdirAll(nested, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(nested)
+
+	if got, want := settingsPath(""), filepath.Join(root, config.DefaultPath); got != want {
+		t.Errorf("settingsPath(\"\") = %q, want %q", got, want)
+	}
+	if got := settingsPath("custom.yml"); got != "custom.yml" {
+		t.Errorf("settingsPath(custom) = %q, want the flag as given", got)
+	}
+
+	// Outside a repository the default stays relative to the current directory.
+	outside := t.TempDir()
+	if got, want := repoRoot(outside), outside; got != want {
+		t.Errorf("repoRoot(outside) = %q, want %q", got, want)
 	}
 }
 

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/cli/go-gh/v2/pkg/api"
@@ -53,7 +54,7 @@ func Execute() int {
 		SilenceErrors: true,
 	}
 
-	root.PersistentFlags().StringVarP(&opts.file, "file", "f", config.DefaultPath, "path to the settings file")
+	root.PersistentFlags().StringVarP(&opts.file, "file", "f", "", "path to the settings file (default: "+config.DefaultPath+" at the repository root)")
 	root.PersistentFlags().StringVarP(&opts.repo, "repo", "R", "", "repository to manage, as owner/repo (default: the current repository)")
 
 	root.AddCommand(newInitCommand(&opts), newPlanCommand(&opts), newApplyCommand(&opts))
@@ -100,5 +101,32 @@ func newClient() (*api.RESTClient, error) {
 
 // loadConfig reads the settings file named by the shared flags.
 func loadConfig(opts *globalOptions) (*config.Declaration, error) {
-	return config.Load(opts.file)
+	return config.Load(settingsPath(opts.file))
+}
+
+// settingsPath is the settings file to use: the one --file names, or else
+// config.DefaultPath under the repository root. Outside a repository it is
+// relative to the current directory.
+func settingsPath(flag string) string {
+	if flag != "" {
+		return flag
+	}
+	dir, err := os.Getwd()
+	if err != nil {
+		return config.DefaultPath
+	}
+	return filepath.Join(repoRoot(dir), config.DefaultPath)
+}
+
+// repoRoot walks up from dir to the directory holding .git, which is a file
+// rather than a directory in a worktree. It returns dir when none is found.
+func repoRoot(dir string) string {
+	for d := dir; ; d = filepath.Dir(d) {
+		if _, err := os.Stat(filepath.Join(d, ".git")); err == nil {
+			return d
+		}
+		if filepath.Dir(d) == d {
+			return dir
+		}
+	}
 }

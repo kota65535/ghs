@@ -41,8 +41,9 @@ func newInitCommand(global *globalOptions) *cobra.Command {
 			// Said now rather than after the prompt and the reads, which is
 			// the only reason to look before writing: the write itself
 			// refuses to replace a file that appeared in the meantime.
-			if _, err := os.Stat(global.file); err == nil && !force {
-				return fmt.Errorf("%s already exists (pass --force to overwrite it)", global.file)
+			file := settingsPath(global.file)
+			if _, err := os.Stat(file); err == nil && !force {
+				return fmt.Errorf("%s already exists (pass --force to overwrite it)", file)
 			}
 
 			repo, err := resolveRepo(global.repo)
@@ -68,11 +69,11 @@ func newInitCommand(global *globalOptions) *cobra.Command {
 				return err
 			}
 
-			if err := writeFile(global.file, settings, force); err != nil {
+			if err := writeFile(file, settings, force); err != nil {
 				return err
 			}
 
-			fmt.Fprintf(cmd.OutOrStdout(), "Wrote %s from %s. Run `ghs plan` to check it.\n", global.file, repo)
+			fmt.Fprintf(cmd.OutOrStdout(), "Wrote %s from %s. Run `ghs plan` to check it.\n", file, repo)
 			return nil
 		},
 	}
