@@ -165,7 +165,7 @@ actions:
 `)
 
 	var out bytes.Buffer
-	if err := apply(context.Background(), &out, p); err != nil {
+	if err := apply(context.Background(), &out, p, diff.FormatText); err != nil {
 		t.Fatalf("apply: %v", err)
 	}
 
@@ -204,7 +204,7 @@ func TestApplySkipsNodesThatMatch(t *testing.T) {
 	p := planFor(t, client, "has_issues: true\n\nactions:\n  permissions:\n    enabled: true\n")
 
 	var out bytes.Buffer
-	if err := apply(context.Background(), &out, p); err != nil {
+	if err := apply(context.Background(), &out, p, diff.FormatText); err != nil {
 		t.Fatalf("apply: %v", err)
 	}
 
@@ -225,7 +225,7 @@ func TestApplyReportsAPIFailure(t *testing.T) {
 	p := planFor(t, client, "has_issues: true\n")
 
 	var out bytes.Buffer
-	if err := apply(context.Background(), &out, p); err == nil {
+	if err := apply(context.Background(), &out, p, diff.FormatText); err == nil {
 		t.Fatal("apply succeeded, want the API failure reported")
 	}
 }
@@ -268,5 +268,33 @@ func TestResolveRepo(t *testing.T) {
 		if _, err := resolveRepo(bad); err == nil {
 			t.Errorf("resolveRepo(%q) succeeded, want an error", bad)
 		}
+	}
+}
+
+func TestApplyReportsInTheRequestedFormat(t *testing.T) {
+	client := &fakeClient{reads: map[string]string{
+		"repos/kota65535/ghs": `{"has_issues": false}`,
+	}}
+	p := planFor(t, client, "has_issues: true\n")
+
+	var out bytes.Buffer
+	if err := apply(context.Background(), &out, p, diff.FormatMarkdown); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+
+	if got := client.calls(); len(got) != 1 {
+		t.Fatalf("made %v, want one write", got)
+	}
+	for _, want := range []string{
+		"## ghs apply",
+		"| update | `has_issues` | `false` | `true` |",
+		"**Apply complete. 1 changed.**",
+	} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("output missing %q:\n%s", want, out.String())
+		}
+	}
+	if strings.Contains(out.String(), "Plan:") {
+		t.Errorf("output still reads as a plan:\n%s", out.String())
 	}
 }
