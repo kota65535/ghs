@@ -286,7 +286,7 @@ func TestApplyReportsInTheRequestedFormat(t *testing.T) {
 		t.Fatalf("made %v, want one write", got)
 	}
 	for _, want := range []string{
-		"## ghs plan",
+		"## ghs apply",
 		"| update | `has_issues` | `false` | `true` |",
 		"**Apply complete. 1 changed.**",
 	} {

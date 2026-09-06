@@ -71,7 +71,12 @@ func Perform(w io.Writer, plan *Plan, format Format, act func() error, opts ...O
 	plan = plan.Prune()
 	summary := plan.Summarize()
 
-	if act != nil && plan == nil {
+	// The heading names the command even when there is nothing for it to do.
+	heading := "ghs plan"
+	if act != nil {
+		heading = "ghs apply"
+	}
+	if plan == nil {
 		act = nil
 	}
 
@@ -86,7 +91,7 @@ func Perform(w io.Writer, plan *Plan, format Format, act func() error, opts ...O
 
 	var err error
 	if format == FormatMarkdown {
-		err = renderMarkdown(w, plan)
+		err = renderMarkdown(w, plan, heading)
 	} else {
 		err = renderText(w, plan, options)
 	}
@@ -394,8 +399,8 @@ func unpad(label string) string {
 	return trimmed + " "
 }
 
-func renderMarkdown(w io.Writer, plan *Plan) error {
-	if _, err := fmt.Fprintln(w, "## ghs plan"); err != nil {
+func renderMarkdown(w io.Writer, plan *Plan, heading string) error {
+	if _, err := fmt.Fprintf(w, "## %s\n", heading); err != nil {
 		return err
 	}
 	if plan == nil {
