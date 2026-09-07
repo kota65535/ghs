@@ -3,7 +3,7 @@ module github.com/kota65535/ghs
 go 1.26.1
 
 require (
-	github.com/charmbracelet/huh v1.0.0
+	github.com/charmbracelet/huh/v2 v2.0.3
 	github.com/cli/go-gh/v2 v2.16.0
 	github.com/spf13/cobra v1.10.2
 	gopkg.in/yaml.v3 v3.0.1
