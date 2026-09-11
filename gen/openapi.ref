@@ -3,4 +3,4 @@
 # Renovate keeps this digest current; run `go generate ./...` after it changes.
 #
 # renovate: datasource=git-refs depName=https://github.com/github/rest-api-description branch=main
-0a144e030abbe358000f0d32874e197b59a8f7ed
+220b20a048309ad7f3fb766262892b36dd1c5ab7
