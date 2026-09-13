@@ -277,8 +277,16 @@ ghs apply [flags]    apply the settings file (--format text|markdown|json)
 | `--format` | `plan` only: `text`, `markdown`, `json` |
 | `--exit-code` | `plan` only: exit 2 when there are differences |
 | `--force` | `init` only: overwrite the settings file if it exists |
+| `--resource` | `init` only: resources to manage, skipping the prompt (`all`, or a comma-separated list) |
 
-`init` needs a terminal to ask what to manage, and it leaves two fields out of what it writes: the repository's `name`, which renames it, and `security_and_analysis`, which is reported for every repository but accepted only where the features behind it are available. Declare either by hand if you want it managed.
+`init` asks what to manage at the terminal unless `--resource` answers it first, which is what a script needs:
+
+```
+ghs init --resource all
+ghs init --resource repository,rulesets
+```
+
+It leaves two fields out of what it writes: the repository's `name`, which renames it, and `security_and_analysis`, which is reported for every repository but accepted only where the features behind it are available. Declare either by hand if you want it managed.
 
 `plan` exits 0 even when there are differences, so a pull request check does not fail just because changes are pending. Use `--exit-code` if you want to branch on it.
 

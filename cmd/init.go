@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
@@ -26,6 +27,7 @@ const repositoryKey = "repository"
 
 func newInitCommand(global *globalOptions) *cobra.Command {
 	var force bool
+	var resources []string
 
 	cmd := &cobra.Command{
 		Use:   "init",
@@ -51,8 +53,18 @@ func newInitCommand(global *globalOptions) *cobra.Command {
 				return err
 			}
 
-			selected, err := selectResources()
-			if err != nil {
+			// --resource answers the prompt ahead of time, which is what a
+			// script needs: there is no one at the terminal to answer it.
+			selected := expandAll(resources)
+			if len(selected) == 0 {
+				selected, err = selectResources()
+				if err != nil {
+					return err
+				}
+			}
+			// Said before the reads rather than during them, so a typo does not
+			// cost a round of API calls first.
+			if _, err := order(selected); err != nil {
 				return err
 			}
 			if len(selected) == 0 {
@@ -79,8 +91,25 @@ func newInitCommand(global *globalOptions) *cobra.Command {
 	}
 
 	cmd.Flags().BoolVar(&force, "force", false, "overwrite the settings file if it exists")
+	cmd.Flags().StringSliceVar(&resources, "resource", nil,
+		"resources to manage, skipping the prompt (\""+allKeyword+"\" or any of: "+
+			strings.Join(resourceKeys(), ", ")+")")
 
 	return cmd
+}
+
+// allKeyword asks for every resource, which is what the prompt answers when it
+// is submitted untouched. Naming the whole set is what a script wants: the list
+// grows with the schema, and spelling it out would leave the new one unmanaged.
+const allKeyword = "all"
+
+// expandAll replaces the "all" keyword with every resource. Anything else is
+// passed through to be checked against the resources that exist.
+func expandAll(selected []string) []string {
+	if slices.Contains(selected, allKeyword) {
+		return resourceKeys()
+	}
+	return selected
 }
 
 // resourceKeys are the resources init offers, in the order they are offered:
