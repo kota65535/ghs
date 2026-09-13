@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 
@@ -190,6 +191,38 @@ func TestTheResourcePromptStartsFullySelected(t *testing.T) {
 		if !strings.Contains(view, "✓ "+key) {
 			t.Errorf("option %q does not start selected:\n%s", key, view)
 		}
+	}
+}
+
+// TestOrderRejectsAnUnknownResource checks what --resource is validated
+// against: a name that is not a resource stops init rather than being written
+// as a key plan cannot load.
+func TestOrderRejectsAnUnknownResource(t *testing.T) {
+	_, err := order([]string{"rulesets", "ruleset"})
+	if err == nil {
+		t.Fatal("order accepted an unknown resource")
+	}
+	// The message has to say what the answer could have been, since that is
+	// the whole of what the caller has to go on.
+	for _, key := range append(resourceKeys(), allKeyword) {
+		if !strings.Contains(err.Error(), key) {
+			t.Errorf("error does not name %q: %v", key, err)
+		}
+	}
+	if _, err := order(resourceKeys()); err != nil {
+		t.Fatalf("order rejected a known resource: %v", err)
+	}
+}
+
+// TestExpandAllNamesEveryResource checks the keyword --resource takes in place
+// of the list, which has to stay in step with the resources that exist: a
+// keyword that expanded to a stale list would leave a resource unmanaged.
+func TestExpandAllNamesEveryResource(t *testing.T) {
+	if got := expandAll([]string{allKeyword}); !slices.Equal(got, resourceKeys()) {
+		t.Errorf("expandAll(all) = %v, want %v", got, resourceKeys())
+	}
+	if got := expandAll([]string{"rulesets"}); !slices.Equal(got, []string{"rulesets"}) {
+		t.Errorf("expandAll rewrote a named resource: %v", got)
 	}
 }
 
