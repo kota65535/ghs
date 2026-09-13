@@ -397,9 +397,10 @@ func fetchElements(ctx context.Context, client resource.Client, key string, node
 // options says how the settings are written.
 type options struct {
 	// describe says whether to write what the API description says about each
-	// key. It is false within the second and later elements of a collection,
-	// where the same commentary a second time would only push the settings
-	// apart.
+	// key. It is false within an element that is written about already -- the
+	// second and later elements of a collection, and an array element of a
+	// variant seen earlier in the same array -- where the same commentary a
+	// second time would only push the settings apart.
 	describe bool
 
 	// skipDefaults leaves out a field whose value is the one the API
@@ -498,6 +499,7 @@ func fieldsNode(key string, fields map[string]schema.Field, current map[string]a
 // from the file, which apply then reads as a rule to delete.
 func elementsNode(key string, items []any, field schema.Field, opts options) (*yaml.Node, error) {
 	out := &yaml.Node{Kind: yaml.SequenceNode}
+	described := map[string]bool{}
 
 	for _, item := range items {
 		element, isMapping := item.(map[string]any)
@@ -510,13 +512,21 @@ func elementsNode(key string, items []any, field schema.Field, opts options) (*y
 				key, element["type"])
 		}
 
-		rendered, err := fieldsNode(key, variant.Fields, element, opts)
+		// Each variant is written about once. The bypass actors of a ruleset are
+		// all the one shape, so the second of them repeating what an actor id is
+		// only pushes the actors apart; its rules are not, so a rule of a type
+		// not yet seen is written with what that type accepts.
+		name := variantName(field, element)
+		elementOpts := opts.describing(opts.describe && !described[name])
+		described[name] = true
+
+		rendered, err := fieldsNode(key, variant.Fields, element, elementOpts)
 		if err != nil {
 			return nil, err
 		}
 		// What the element as a whole is goes above its first key, which is the
 		// line that opens the element.
-		if opts.describe && variant.Description != "" && len(rendered.Content) > 0 {
+		if elementOpts.describe && variant.Description != "" && len(rendered.Content) > 0 {
 			first := rendered.Content[0]
 			first.HeadComment = joinComments(comment(variant.Description), first.HeadComment)
 		}
@@ -524,6 +534,17 @@ func elementsNode(key string, items []any, field schema.Field, opts options) (*y
 	}
 
 	return out, nil
+}
+
+// variantName is what selected the description an element was written against,
+// which is the type it declares, or nothing at all where the description states
+// one shape for every element.
+func variantName(field schema.Field, element map[string]any) string {
+	if _, single := field.Variants[""]; single {
+		return ""
+	}
+	declared, _ := element["type"].(string)
+	return declared
 }
 
 // joinComments puts two comment bodies one above the other, dropping the ones

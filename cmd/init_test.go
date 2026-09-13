@@ -368,6 +368,46 @@ func TestGenerateStopsAtARuleTypeItDoesNotKnow(t *testing.T) {
 	}
 }
 
+// TestGenerateWritesEachVariantOnce checks that an array is written about per
+// variant rather than per element: the bypass actors of a ruleset are all the
+// one shape, so what an actor id is belongs above the first of them and nowhere
+// else, while a rule of a type not yet seen takes what that type accepts.
+func TestGenerateWritesEachVariantOnce(t *testing.T) {
+	client := &fakeClient{reads: map[string]string{
+		"repos/kota65535/ghs/rulesets": `[{"id": 7, "name": "protect-main"}]`,
+		"repos/kota65535/ghs/rulesets/7": `{"id": 7, "name": "protect-main", "target": "branch",
+			"enforcement": "active",
+			"bypass_actors": [
+				{"actor_id": 5, "actor_type": "RepositoryRole", "bypass_mode": "always"},
+				{"actor_id": 2740, "actor_type": "Integration", "bypass_mode": "always"}],
+			"rules": [
+				{"type": "deletion"},
+				{"type": "pull_request", "parameters": {"required_approving_review_count": 2}}]}`,
+	}}
+
+	settings, err := generate(context.Background(), client, testRepo, []string{"rulesets"}, false)
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+
+	got := string(settings)
+	if n := strings.Count(got, "The ID of the actor that can bypass a ruleset"); n != 1 {
+		t.Errorf("what an actor id is written %d times, want once:\n%s", n, got)
+	}
+	// The parameters of a rule follow from its type, so a second type is a
+	// second thing to say rather than the same thing again.
+	if !strings.Contains(got, "required_approving_review_count") {
+		t.Errorf("want the pull request rule written:\n%s", got)
+	}
+	if !strings.Contains(got, "The number of approving reviews") {
+		t.Errorf("want the second rule type written with what it accepts:\n%s", got)
+	}
+
+	if _, err := config.Parse(settings); err != nil {
+		t.Errorf("generated file does not parse: %v\n%s", err, got)
+	}
+}
+
 // TestGenerateWritesNumbersAsNumbers checks that the whole numbers the API
 // reports are written as integers however deep they sit, rather than as the
 // float64 JSON decoding leaves them: an actor id spelled 1.312304e+06 is not
