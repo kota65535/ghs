@@ -380,7 +380,7 @@ func TestGenerateWritesNumbersAsNumbers(t *testing.T) {
 			"bypass_actors": [{"actor_id": 1312304, "actor_type": "Integration", "bypass_mode": "always"}]}`,
 	}}
 
-	settings, err := generate(context.Background(), client, testRepo, []string{"rulesets"})
+	settings, err := generate(context.Background(), client, testRepo, []string{"rulesets"}, false)
 	if err != nil {
 		t.Fatalf("generate: %v", err)
 	}
