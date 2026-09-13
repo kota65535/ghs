@@ -280,14 +280,14 @@ ghs apply [flags]    apply the settings file (--format text|markdown|json)
 | `--resource` | `init` only: resources to manage, skipping the prompt (`all`, or a comma-separated list) |
 | `--skip-defaults` | `init` only: leave out the fields whose value is the documented default |
 
-`init --skip-defaults` writes only the fields whose value differs from the one the API documents as the default, so the file describes the decisions made about the repository rather than everything it happens to have. A field the API description states no default for is written whatever it holds.
-
 `init` asks what to manage at the terminal unless `--resource` answers it first, which is what a script needs:
 
 ```
 ghs init --resource all
 ghs init --resource repository,rulesets
 ```
+
+`init` also asks whether to manage the fields left at the value the API documents as their default, starting at yes. Answering no writes only the fields whose value differs from that default, so the file describes the decisions made about the repository rather than everything it happens to have. A field the API description states no default for is written whatever it holds. `--skip-defaults` is that answer given up front, and skips the question — as does `--resource`, which leaves the terminal out of it altogether.
 
 It leaves two fields out of what it writes: the repository's `name`, which renames it, and `security_and_analysis`, which is reported for every repository but accepted only where the features behind it are available. Declare either by hand if you want it managed.
 

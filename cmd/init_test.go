@@ -267,6 +267,19 @@ func TestExpandAllNamesEveryResource(t *testing.T) {
 	}
 }
 
+// TestTheDefaultsPromptStartsAtYes checks the other thing huh does not state:
+// a confirmation takes the value it is pointed at as its answer, so the prompt
+// opens on "Yes" and submitting it untouched manages the defaults. Were that to
+// change, init would quietly start leaving fields out.
+func TestTheDefaultsPromptStartsAtYes(t *testing.T) {
+	manageDefaults := true
+	field := huh.NewConfirm().Value(&manageDefaults)
+
+	if answer, ok := field.GetValue().(bool); !ok || !answer {
+		t.Errorf("the prompt does not start at yes: GetValue() = %#v", field.GetValue())
+	}
+}
+
 // TestGenerateDeclaresAnEmptyCollection checks that a selected collection with
 // no elements is written as the empty set, which is what says "there should be
 // none" rather than "not managed".

@@ -39,9 +39,10 @@ func newInitCommand(global *globalOptions) *cobra.Command {
 			"Only writable fields are written: what the API reports and no request\n" +
 			"accepts -- an id, a timestamp -- is left out. A resource that is not\n" +
 			"selected is not written at all, which is what leaves it unmanaged.\n\n" +
-			"--skip-defaults narrows it further, to the fields whose value is not the\n" +
-			"one the API documents as the default: what someone decided, rather than\n" +
-			"everything the repository happens to have.",
+			"It also asks whether to manage the fields left at the value the API\n" +
+			"documents as their default. Answering no narrows the file to what someone\n" +
+			"decided, rather than everything the repository happens to have.\n" +
+			"--skip-defaults is that answer given up front, and skips the question.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			// Said now rather than after the prompt and the reads, which is
@@ -64,6 +65,16 @@ func newInitCommand(global *globalOptions) *cobra.Command {
 				selected, err = selectResources()
 				if err != nil {
 					return err
+				}
+				// Asked only where --skip-defaults has not already answered: a
+				// flag that was passed is an answer, and asking again would
+				// only be a chance to contradict it.
+				if !cmd.Flags().Changed("skip-defaults") {
+					manageDefaults, err := askManageDefaults()
+					if err != nil {
+						return err
+					}
+					skipDefaults = !manageDefaults
 				}
 			}
 			// Said before the reads rather than during them, so a typo does not
@@ -145,6 +156,28 @@ func selectResources() ([]string, error) {
 
 	sort.Strings(selected)
 	return selected, nil
+}
+
+// askManageDefaults asks whether the fields left at their documented default
+// are managed too.
+//
+// It starts at yes for the reason the resources start selected: a file that
+// says what the repository has is what init is for, and narrowing it is the
+// second thought.
+func askManageDefaults() (bool, error) {
+	manage := true
+
+	form := huh.NewForm(huh.NewGroup(
+		huh.NewConfirm().
+			Title("Manage the fields left at their default?").
+			Description("No writes only the fields whose value differs from the API's documented default.").
+			Value(&manage),
+	))
+	if err := form.Run(); err != nil {
+		return false, fmt.Errorf("ask about the defaults: %w", err)
+	}
+
+	return manage, nil
 }
 
 // generate reads the current settings of the selected resources and renders
