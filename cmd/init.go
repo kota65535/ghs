@@ -13,6 +13,7 @@ import (
 
 	"github.com/charmbracelet/huh"
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 	"gopkg.in/yaml.v3"
 
 	"github.com/kota65535/ghs/internal/diff"
@@ -39,10 +40,8 @@ func newInitCommand(global *globalOptions) *cobra.Command {
 			"Only writable fields are written: what the API reports and no request\n" +
 			"accepts -- an id, a timestamp -- is left out. A resource that is not\n" +
 			"selected is not written at all, which is what leaves it unmanaged.\n\n" +
-			"It also asks whether to manage the fields left at the value the API\n" +
-			"documents as their default. Answering no narrows the file to what someone\n" +
-			"decided, rather than everything the repository happens to have.\n" +
-			"--skip-defaults is that answer given up front, and skips the question.",
+			"Each question a flag has not answered is asked at the terminal. Without\n" +
+			"one, nothing is asked and every flag stands at its default.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			// Said now rather than after the prompt and the reads, which is
@@ -58,24 +57,29 @@ func newInitCommand(global *globalOptions) *cobra.Command {
 				return err
 			}
 
-			// --resource answers the prompt ahead of time, which is what a
-			// script needs: there is no one at the terminal to answer it.
+			// Each question is asked only where a flag has not already answered
+			// it, and only where there is someone to answer: without a terminal
+			// every flag stands at its default, which is every resource and the
+			// defaults among them.
+			asking := atTerminal()
+
 			selected := expandAll(resources)
 			if len(selected) == 0 {
-				selected, err = selectResources()
-				if err != nil {
-					return err
-				}
-				// Asked only where --skip-defaults has not already answered: a
-				// flag that was passed is an answer, and asking again would
-				// only be a chance to contradict it.
-				if !cmd.Flags().Changed("skip-defaults") {
-					manageDefaults, err := askManageDefaults()
+				if asking {
+					selected, err = selectResources()
 					if err != nil {
 						return err
 					}
-					skipDefaults = !manageDefaults
+				} else {
+					selected = resourceKeys()
 				}
+			}
+			if asking && !cmd.Flags().Changed("skip-defaults") {
+				manageDefaults, err := askManageDefaults()
+				if err != nil {
+					return err
+				}
+				skipDefaults = !manageDefaults
 			}
 			// Said before the reads rather than during them, so a typo does not
 			// cost a round of API calls first.
@@ -107,7 +111,7 @@ func newInitCommand(global *globalOptions) *cobra.Command {
 
 	cmd.Flags().BoolVar(&force, "force", false, "overwrite the settings file if it exists")
 	cmd.Flags().StringSliceVar(&resources, "resource", nil,
-		"resources to manage, skipping the prompt (\""+allKeyword+"\" or any of: "+
+		"resources to manage (\""+allKeyword+"\" or any of: "+
 			strings.Join(resourceKeys(), ", ")+")")
 	cmd.Flags().BoolVar(&skipDefaults, "skip-defaults", false,
 		"leave out the fields whose value is the one the API documents as the default")
@@ -134,6 +138,13 @@ func expandAll(selected []string) []string {
 func resourceKeys() []string {
 	return append([]string{repositoryKey}, schema.Root().ChildNames()...)
 }
+
+// atTerminal reports whether there is someone to answer a question.
+//
+// Input is what is checked rather than output, since that is what a prompt is
+// answered through: a run whose output is piped to a file is still a run
+// someone is sitting at.
+func atTerminal() bool { return term.IsTerminal(int(os.Stdin.Fd())) }
 
 // selectResources asks which resources to manage.
 //
