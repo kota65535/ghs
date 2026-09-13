@@ -34,7 +34,7 @@ func TestGenerateWritesTheCurrentSettings(t *testing.T) {
 		"repos/kota65535/ghs/environments/production/variables": `{"total_count": 0, "variables": []}`,
 	}}
 
-	settings, err := generate(context.Background(), client, testRepo, []string{"actions", "environments", repositoryKey})
+	settings, err := generate(context.Background(), client, testRepo, []string{"actions", "environments", repositoryKey}, false)
 	if err != nil {
 		t.Fatalf("generate: %v", err)
 	}
@@ -78,6 +78,47 @@ func TestGenerateWritesTheCurrentSettings(t *testing.T) {
 	}
 }
 
+// TestGenerateSkipsTheFieldsLeftAtTheirDefault checks --skip-defaults: a field
+// holding the value the API documents as its default is left out, one holding
+// anything else is written, and a field the description states no default for
+// is written whatever it holds.
+func TestGenerateSkipsTheFieldsLeftAtTheirDefault(t *testing.T) {
+	client := &fakeClient{reads: map[string]string{
+		"repos/kota65535/ghs": `{
+			"has_issues":     true,
+			"has_wiki":       false,
+			"allow_forking":  false,
+			"default_branch": "main"
+		}`,
+	}}
+
+	settings, err := generate(context.Background(), client, testRepo, []string{repositoryKey}, true)
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	got := string(settings)
+
+	// has_wiki defaults to true and is false here; default_branch has no
+	// documented default, so what it holds is a decision either way.
+	for _, want := range []string{"has_wiki: false", "default_branch: main"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("generated file is missing %q:\n%s", want, got)
+		}
+	}
+
+	// has_issues defaults to true and allow_forking to false, which is what
+	// each of them holds.
+	for _, unwanted := range []string{"has_issues", "allow_forking"} {
+		if strings.Contains(got, unwanted) {
+			t.Errorf("generated file should not hold %q:\n%s", unwanted, got)
+		}
+	}
+
+	if _, err := config.Parse(settings); err != nil {
+		t.Errorf("generated file does not parse: %v\n%s", err, got)
+	}
+}
+
 // TestGenerateWritesWhatEachSettingIsFor checks that the field descriptions and
 // the operation titles from the API description come out as comments, and that
 // they stay within a width a file is read at.
@@ -89,7 +130,7 @@ func TestGenerateWritesWhatEachSettingIsFor(t *testing.T) {
 			{"name": "A", "value": "1"}, {"name": "B", "value": "2"}]}`,
 	}}
 
-	settings, err := generate(context.Background(), client, testRepo, []string{repositoryKey, "actions"})
+	settings, err := generate(context.Background(), client, testRepo, []string{repositoryKey, "actions"}, false)
 	if err != nil {
 		t.Fatalf("generate: %v", err)
 	}
@@ -234,7 +275,7 @@ func TestGenerateDeclaresAnEmptyCollection(t *testing.T) {
 		"repos/kota65535/ghs/rulesets": `[]`,
 	}}
 
-	settings, err := generate(context.Background(), client, testRepo, []string{"rulesets"})
+	settings, err := generate(context.Background(), client, testRepo, []string{"rulesets"}, false)
 	if err != nil {
 		t.Fatalf("generate: %v", err)
 	}
@@ -260,7 +301,7 @@ func TestGenerateWritesWhatEachRuleIsFor(t *testing.T) {
 			]}`,
 	}}
 
-	settings, err := generate(context.Background(), client, testRepo, []string{"rulesets"})
+	settings, err := generate(context.Background(), client, testRepo, []string{"rulesets"}, false)
 	if err != nil {
 		t.Fatalf("generate: %v", err)
 	}
@@ -302,7 +343,7 @@ func TestGenerateStopsAtARuleTypeItDoesNotKnow(t *testing.T) {
 			"rules": [{"type": "a_rule_from_the_future"}]}`,
 	}}
 
-	_, err := generate(context.Background(), client, testRepo, []string{"rulesets"})
+	_, err := generate(context.Background(), client, testRepo, []string{"rulesets"}, false)
 	if err == nil {
 		t.Fatal("generate succeeded, want the unknown rule type reported")
 	}

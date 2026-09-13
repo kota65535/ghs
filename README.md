@@ -278,6 +278,9 @@ ghs apply [flags]    apply the settings file (--format text|markdown|json)
 | `--exit-code` | `plan` only: exit 2 when there are differences |
 | `--force` | `init` only: overwrite the settings file if it exists |
 | `--resource` | `init` only: resources to manage, skipping the prompt (`all`, or a comma-separated list) |
+| `--skip-defaults` | `init` only: leave out the fields whose value is the documented default |
+
+`init --skip-defaults` writes only the fields whose value differs from the one the API documents as the default, so the file describes the decisions made about the repository rather than everything it happens to have. A field the API description states no default for is written whatever it holds.
 
 `init` asks what to manage at the terminal unless `--resource` answers it first, which is what a script needs:
 
