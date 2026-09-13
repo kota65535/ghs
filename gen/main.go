@@ -183,6 +183,7 @@ type field struct {
 	Type        string
 	Enum        []string
 	Description string
+	Default     any
 	Fields      map[string]field
 	Variants    map[string]field
 }
@@ -439,26 +440,30 @@ func (c converter) properties(props map[string]any, seen []string) map[string]fi
 func (c converter) field(m map[string]any, seen []string) field {
 	// Read before the refs are followed: where a property both refers to a
 	// shared schema and describes itself, what it says about itself is the
-	// description of this field in particular.
+	// description of this field in particular. The same holds for the default.
 	description, _ := m["description"].(string)
+	def := m["default"]
 
 	m, seen, ok := c.resolve(m, seen)
 	if !ok {
 		// A ref that cannot be followed leaves the field free-form, which
 		// passes its content through to the API unvalidated rather than
 		// rejecting settings the API would accept.
-		return field{Description: description}
+		return field{Description: description, Default: def}
 	}
 
-	f := field{Description: description}
+	f := field{Description: description, Default: def}
 
 	if t, ok := m["type"].(string); ok {
 		f.Type = t
 	}
 	// A field described only where its shared schema is defined takes the
-	// description from there.
+	// description from there, and the same for a default stated only there.
 	if f.Description == "" {
 		f.Description, _ = m["description"].(string)
+	}
+	if f.Default == nil {
+		f.Default = m["default"]
 	}
 	if raw, ok := m["enum"].([]any); ok {
 		for _, v := range raw {
@@ -602,6 +607,31 @@ func writeFields(b *strings.Builder, fields map[string]field, depth int) {
 	fmt.Fprintf(b, "%s}", indent)
 }
 
+// defaultLiteral renders a stated default as the Go literal it is written as,
+// reporting false where there is none to write.
+//
+// Only scalars are written. A default that is an object or an array is left
+// out rather than reproduced: what it would be compared against is a value the
+// API reports, and neither ghs nor the description says the two are written
+// the same way.
+func defaultLiteral(value any) (string, bool) {
+	switch v := value.(type) {
+	case bool:
+		return fmt.Sprintf("%t", v), true
+	case string:
+		return fmt.Sprintf("%q", v), true
+	case float64:
+		// JSON has one number type, so an integral default arrives as a float
+		// and is written as the integer it states.
+		if v == float64(int64(v)) {
+			return fmt.Sprintf("%d", int64(v)), true
+		}
+		return fmt.Sprintf("%v", v), true
+	default:
+		return "", false
+	}
+}
+
 func writeField(b *strings.Builder, f field, depth int) {
 	fmt.Fprintf(b, "{")
 
@@ -618,6 +648,9 @@ func writeField(b *strings.Builder, f field, depth int) {
 	}
 	if f.Description != "" {
 		parts = append(parts, fmt.Sprintf("Description: %q", f.Description))
+	}
+	if literal, ok := defaultLiteral(f.Default); ok {
+		parts = append(parts, fmt.Sprintf("Default: %s", literal))
 	}
 	fmt.Fprintf(b, "%s", strings.Join(parts, ", "))
 	written := len(parts) > 0

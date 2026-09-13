@@ -277,14 +277,19 @@ ghs apply [flags]    apply the settings file (--format text|markdown|json)
 | `--format` | `plan` only: `text`, `markdown`, `json` |
 | `--exit-code` | `plan` only: exit 2 when there are differences |
 | `--force` | `init` only: overwrite the settings file if it exists |
-| `--resource` | `init` only: resources to manage, skipping the prompt (`all`, or a comma-separated list) |
+| `--resource` | `init` only: resources to manage (`all`, or a comma-separated list) |
+| `--skip-defaults` | `init` only: leave out the fields whose value is the documented default |
 
-`init` asks what to manage at the terminal unless `--resource` answers it first, which is what a script needs:
+`init` asks two things at the terminal: what to manage, and whether to manage the fields left at the value the API documents as their default. The second starts at yes; answering no writes only the fields whose value differs from that default, so the file describes the decisions made about the repository rather than everything it happens to have. A field the API description states no default for is written whatever it holds.
+
+Each flag answers its own question ahead of time, and that question is not asked again:
 
 ```
 ghs init --resource all
-ghs init --resource repository,rulesets
+ghs init --resource repository,rulesets --skip-defaults
 ```
+
+Run without a terminal — in CI — and nothing is asked at all: every flag stands at its default, which is every resource and the defaults among them.
 
 It leaves two fields out of what it writes: the repository's `name`, which renames it, and `security_and_analysis`, which is reported for every repository but accepted only where the features behind it are available. Declare either by hand if you want it managed.
 

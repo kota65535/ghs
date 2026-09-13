@@ -42,6 +42,16 @@ type Field struct {
 	// between a generated file you read and one you look up field by field.
 	Description string
 
+	// Default is the value the API description states the field takes when it
+	// is not set: what a repository has unless someone changed it. It is nil
+	// where the description states none.
+	//
+	// Nothing is validated against it. It is here so that `ghs init
+	// --skip-defaults` can leave out the fields that were never changed, which
+	// is the difference between a file that describes a repository and one that
+	// describes the decisions made about it.
+	Default any
+
 	// Fields holds the nested field definitions of an object field. It is nil
 	// for scalars and for objects whose properties the description leaves
 	// unspecified (a free-form object), in which case the nested content is

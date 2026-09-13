@@ -13,6 +13,7 @@ import (
 
 	"github.com/charmbracelet/huh"
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 	"gopkg.in/yaml.v3"
 
 	"github.com/kota65535/ghs/internal/diff"
@@ -28,6 +29,7 @@ const repositoryKey = "repository"
 func newInitCommand(global *globalOptions) *cobra.Command {
 	var force bool
 	var resources []string
+	var skipDefaults bool
 
 	cmd := &cobra.Command{
 		Use:   "init",
@@ -37,7 +39,9 @@ func newInitCommand(global *globalOptions) *cobra.Command {
 			"the file can be trimmed down from there.\n\n" +
 			"Only writable fields are written: what the API reports and no request\n" +
 			"accepts -- an id, a timestamp -- is left out. A resource that is not\n" +
-			"selected is not written at all, which is what leaves it unmanaged.",
+			"selected is not written at all, which is what leaves it unmanaged.\n\n" +
+			"Each question a flag has not answered is asked at the terminal. Without\n" +
+			"one, nothing is asked and every flag stands at its default.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			// Said now rather than after the prompt and the reads, which is
@@ -53,14 +57,29 @@ func newInitCommand(global *globalOptions) *cobra.Command {
 				return err
 			}
 
-			// --resource answers the prompt ahead of time, which is what a
-			// script needs: there is no one at the terminal to answer it.
+			// Each question is asked only where a flag has not already answered
+			// it, and only where there is someone to answer: without a terminal
+			// every flag stands at its default, which is every resource and the
+			// defaults among them.
+			asking := atTerminal()
+
 			selected := expandAll(resources)
 			if len(selected) == 0 {
-				selected, err = selectResources()
+				if asking {
+					selected, err = selectResources()
+					if err != nil {
+						return err
+					}
+				} else {
+					selected = resourceKeys()
+				}
+			}
+			if asking && !cmd.Flags().Changed("skip-defaults") {
+				manageDefaults, err := askManageDefaults()
 				if err != nil {
 					return err
 				}
+				skipDefaults = !manageDefaults
 			}
 			// Said before the reads rather than during them, so a typo does not
 			// cost a round of API calls first.
@@ -76,7 +95,7 @@ func newInitCommand(global *globalOptions) *cobra.Command {
 				return err
 			}
 
-			settings, err := generate(cmd.Context(), client, repo, selected)
+			settings, err := generate(cmd.Context(), client, repo, selected, skipDefaults)
 			if err != nil {
 				return err
 			}
@@ -92,8 +111,10 @@ func newInitCommand(global *globalOptions) *cobra.Command {
 
 	cmd.Flags().BoolVar(&force, "force", false, "overwrite the settings file if it exists")
 	cmd.Flags().StringSliceVar(&resources, "resource", nil,
-		"resources to manage, skipping the prompt (\""+allKeyword+"\" or any of: "+
+		"resources to manage (\""+allKeyword+"\" or any of: "+
 			strings.Join(resourceKeys(), ", ")+")")
+	cmd.Flags().BoolVar(&skipDefaults, "skip-defaults", false,
+		"leave out the fields whose value is the one the API documents as the default")
 
 	return cmd
 }
@@ -118,6 +139,13 @@ func resourceKeys() []string {
 	return append([]string{repositoryKey}, schema.Root().ChildNames()...)
 }
 
+// atTerminal reports whether there is someone to answer a question.
+//
+// Input is what is checked rather than output, since that is what a prompt is
+// answered through: a run whose output is piped to a file is still a run
+// someone is sitting at.
+func atTerminal() bool { return term.IsTerminal(int(os.Stdin.Fd())) }
+
 // selectResources asks which resources to manage.
 //
 // Every resource starts selected, since a file describing all of them is the
@@ -141,6 +169,28 @@ func selectResources() ([]string, error) {
 	return selected, nil
 }
 
+// askManageDefaults asks whether the fields left at their documented default
+// are managed too.
+//
+// It starts at yes for the reason the resources start selected: a file that
+// says what the repository has is what init is for, and narrowing it is the
+// second thought.
+func askManageDefaults() (bool, error) {
+	manage := true
+
+	form := huh.NewForm(huh.NewGroup(
+		huh.NewConfirm().
+			Title("Manage the fields left at their default?").
+			Description("No writes only the fields whose value differs from the API's documented default.").
+			Value(&manage),
+	))
+	if err := form.Run(); err != nil {
+		return false, fmt.Errorf("ask about the defaults: %w", err)
+	}
+
+	return manage, nil
+}
+
 // generate reads the current settings of the selected resources and renders
 // them as a settings file, each field under what the API description says it
 // is for.
@@ -148,7 +198,7 @@ func selectResources() ([]string, error) {
 // The file is built as a YAML tree rather than marshalled from a map, for the
 // two things a map cannot carry: the comments, and the order. The repository's
 // own fields have to come first, since they are the top level of the file.
-func generate(ctx context.Context, client resource.Client, repo resource.Repo, selected []string) ([]byte, error) {
+func generate(ctx context.Context, client resource.Client, repo resource.Repo, selected []string, skipDefaults bool) ([]byte, error) {
 	root := schema.Root()
 	path := resource.At(repo)
 
@@ -157,6 +207,7 @@ func generate(ctx context.Context, client resource.Client, repo resource.Repo, s
 		return nil, err
 	}
 
+	opts := options{describe: true, skipDefaults: skipDefaults}
 	doc := &yaml.Node{Kind: yaml.MappingNode}
 
 	for _, key := range ordered {
@@ -165,7 +216,7 @@ func generate(ctx context.Context, client resource.Client, repo resource.Repo, s
 			if err != nil {
 				return nil, err
 			}
-			fields, err := fieldsNode("", root.Fields, current, true)
+			fields, err := fieldsNode("", root.Fields, current, opts)
 			if err != nil {
 				return nil, err
 			}
@@ -176,7 +227,7 @@ func generate(ctx context.Context, client resource.Client, repo resource.Repo, s
 		}
 
 		node, _ := root.Child(key)
-		value, err := fetchNode(ctx, client, key, node, path.Child(node.Segment), true)
+		value, err := fetchNode(ctx, client, key, node, path.Child(node.Segment), opts)
 		if err != nil {
 			return nil, err
 		}
@@ -246,12 +297,10 @@ func order(selected []string) ([]string, error) {
 // It returns nil where there is nothing to write: a namespace whose children
 // are all empty, or a node whose path this repository does not have.
 //
-// describe says whether to write what the API description says about each key.
-// It is false within the second and later elements of a collection, where the
-// same commentary a second time would only push the settings apart.
-func fetchNode(ctx context.Context, client resource.Client, key string, node schema.Node, path resource.Path, describe bool) (*yaml.Node, error) {
+// opts says how the settings are written; see options.
+func fetchNode(ctx context.Context, client resource.Client, key string, node schema.Node, path resource.Path, opts options) (*yaml.Node, error) {
 	if node.IsCollection() {
-		return fetchElements(ctx, client, key, node, path, describe)
+		return fetchElements(ctx, client, key, node, path, opts)
 	}
 
 	out := &yaml.Node{Kind: yaml.MappingNode}
@@ -261,7 +310,7 @@ func fetchNode(ctx context.Context, client resource.Client, key string, node sch
 		if err != nil {
 			return nil, err
 		}
-		fields, err := fieldsNode(key, node.Fields, current, describe)
+		fields, err := fieldsNode(key, node.Fields, current, opts)
 		if err != nil {
 			return nil, err
 		}
@@ -270,14 +319,14 @@ func fetchNode(ctx context.Context, client resource.Client, key string, node sch
 
 	for _, name := range node.ChildNames() {
 		child, _ := node.Child(name)
-		value, err := fetchNode(ctx, client, join(key, name), child, path.Child(child.Segment), describe)
+		value, err := fetchNode(ctx, client, join(key, name), child, path.Child(child.Segment), opts)
 		if err != nil {
 			return nil, err
 		}
 		if value == nil {
 			continue
 		}
-		if describe {
+		if opts.describe {
 			put(out, name, comment(child.Summary), value)
 		} else {
 			put(out, name, "", value)
@@ -296,7 +345,7 @@ func fetchNode(ctx context.Context, client resource.Client, key string, node sch
 // A collection with no elements comes out as an empty sequence rather than as
 // nothing at all: the key is being written because the set was selected, and
 // declaring the empty set is how a repository with no rulesets is stated.
-func fetchElements(ctx context.Context, client resource.Client, key string, node schema.Node, path resource.Path, describe bool) (*yaml.Node, error) {
+func fetchElements(ctx context.Context, client resource.Client, key string, node schema.Node, path resource.Path, opts options) (*yaml.Node, error) {
 	collection := resource.CollectionFor(key)
 
 	current, err := collection.FetchAll(ctx, client, node, path)
@@ -308,9 +357,9 @@ func fetchElements(ctx context.Context, client resource.Client, key string, node
 	for i, name := range sortedKeys(current) {
 		// Only the first element carries the commentary: what the fields of one
 		// are is a property of the collection, not of the element.
-		describeElement := describe && i == 0
+		elementOpts := opts.describing(opts.describe && i == 0)
 
-		element, err := fieldsNode(key, node.Fields, current[name], describeElement)
+		element, err := fieldsNode(key, node.Fields, current[name], elementOpts)
 		if err != nil {
 			return nil, err
 		}
@@ -323,14 +372,14 @@ func fetchElements(ctx context.Context, client resource.Client, key string, node
 			for _, childName := range node.ChildNames() {
 				child, _ := node.Child(childName)
 				value, err := fetchNode(ctx, client, join(diff.ElementPath(key, name), childName), child,
-					elementPath.Child(child.Segment), describeElement)
+					elementPath.Child(child.Segment), elementOpts)
 				if err != nil {
 					return nil, err
 				}
 				if value == nil {
 					continue
 				}
-				if describeElement {
+				if elementOpts.describe {
 					put(element, childName, comment(child.Summary), value)
 				} else {
 					put(element, childName, "", value)
@@ -344,6 +393,40 @@ func fetchElements(ctx context.Context, client resource.Client, key string, node
 	return out, nil
 }
 
+// options says how the settings are written.
+type options struct {
+	// describe says whether to write what the API description says about each
+	// key. It is false within the second and later elements of a collection,
+	// where the same commentary a second time would only push the settings
+	// apart.
+	describe bool
+
+	// skipDefaults leaves out a field whose value is the one the API
+	// description documents as its default, which is what narrows the file down
+	// to the settings someone decided.
+	skipDefaults bool
+}
+
+// describing returns the same options, writing the commentary or not.
+func (o options) describing(describe bool) options {
+	o.describe = describe
+	return o
+}
+
+// isDefault reports a value that is what the field has unless it is set.
+//
+// The comparison is made on how the two print, since they come from different
+// places: the default is a Go literal written by the generator, and the value
+// was decoded from the API's JSON, where every number is a float. Only scalars
+// are ever compared -- the generator writes no other kind of default -- so
+// there is no structure for this to flatten.
+func isDefault(field schema.Field, value any) bool {
+	if field.Default == nil {
+		return false
+	}
+	return fmt.Sprint(field.Default) == fmt.Sprint(value)
+}
+
 // fieldsNode renders what the API reported and a request would accept,
 // dropping everything else: the fields only ever read back, and the fields
 // this repository has nothing for. Each one is written under what the
@@ -352,7 +435,7 @@ func fetchElements(ctx context.Context, client resource.Client, key string, node
 // Nested objects are filtered to the depth the description defines. An object
 // whose properties it leaves unspecified is carried over whole, since there is
 // nothing to filter it against.
-func fieldsNode(key string, fields map[string]schema.Field, current map[string]any, describe bool) (*yaml.Node, error) {
+func fieldsNode(key string, fields map[string]schema.Field, current map[string]any, opts options) (*yaml.Node, error) {
 	out := &yaml.Node{Kind: yaml.MappingNode}
 
 	for _, name := range sortedKeys(fields) {
@@ -362,10 +445,13 @@ func fieldsNode(key string, fields map[string]schema.Field, current map[string]a
 		if !reported || value == nil || unmanaged(key, name) {
 			continue
 		}
+		if opts.skipDefaults && isDefault(field, value) {
+			continue
+		}
 
 		rendered := &yaml.Node{}
 		if nested, ok := value.(map[string]any); ok && len(field.Fields) > 0 {
-			filtered, err := fieldsNode(join(key, name), field.Fields, nested, describe)
+			filtered, err := fieldsNode(join(key, name), field.Fields, nested, opts)
 			if err != nil {
 				return nil, err
 			}
@@ -374,7 +460,7 @@ func fieldsNode(key string, fields map[string]schema.Field, current map[string]a
 			}
 			rendered = filtered
 		} else if items, ok := value.([]any); ok && len(field.Variants) > 0 {
-			filtered, err := elementsNode(join(key, name), items, field, describe)
+			filtered, err := elementsNode(join(key, name), items, field, opts)
 			if err != nil {
 				return nil, err
 			}
@@ -383,7 +469,7 @@ func fieldsNode(key string, fields map[string]schema.Field, current map[string]a
 			return nil, fmt.Errorf("render %s: %w", join(key, name), err)
 		}
 
-		if describe {
+		if opts.describe {
 			put(out, name, comment(field.Description), rendered)
 		} else {
 			// Nothing is written about these, so there is nothing for a blank
@@ -409,7 +495,7 @@ func fieldsNode(key string, fields map[string]schema.Field, current map[string]a
 // being written as it was reported or filtered down to nothing. Writing it
 // would produce a file plan refuses to load, and filtering it would drop a rule
 // from the file, which apply then reads as a rule to delete.
-func elementsNode(key string, items []any, field schema.Field, describe bool) (*yaml.Node, error) {
+func elementsNode(key string, items []any, field schema.Field, opts options) (*yaml.Node, error) {
 	out := &yaml.Node{Kind: yaml.SequenceNode}
 
 	for _, item := range items {
@@ -423,13 +509,13 @@ func elementsNode(key string, items []any, field schema.Field, describe bool) (*
 				key, element["type"])
 		}
 
-		rendered, err := fieldsNode(key, variant.Fields, element, describe)
+		rendered, err := fieldsNode(key, variant.Fields, element, opts)
 		if err != nil {
 			return nil, err
 		}
 		// What the element as a whole is goes above its first key, which is the
 		// line that opens the element.
-		if describe && variant.Description != "" && len(rendered.Content) > 0 {
+		if opts.describe && variant.Description != "" && len(rendered.Content) > 0 {
 			first := rendered.Content[0]
 			first.HeadComment = joinComments(comment(variant.Description), first.HeadComment)
 		}
