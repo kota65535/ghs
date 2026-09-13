@@ -272,11 +272,11 @@ ghs apply [flags]    apply the settings file (--format text|markdown|json)
 
 | Flag | |
 | --- | --- |
-| `-f`, `--file` | settings file (default `.github/settings.yml`) |
+| `-c`, `--config` | settings file (default `.github/settings.yml`) |
 | `-R`, `--repo` | `owner/repo` (default: the current repository) |
 | `--format` | `plan` only: `text`, `markdown`, `json` |
 | `--exit-code` | `plan` only: exit 2 when there are differences |
-| `--force` | `init` only: overwrite the settings file if it exists |
+| `-f`, `--force` | `init` only: overwrite the settings file if it exists |
 | `--resource` | `init` only: resources to manage (`all`, or a comma-separated list) |
 | `--skip-defaults` | `init` only: leave out the fields whose value is the documented default |
 
