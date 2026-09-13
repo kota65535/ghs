@@ -198,8 +198,16 @@ func TestTheResourcePromptStartsFullySelected(t *testing.T) {
 // against: a name that is not a resource stops init rather than being written
 // as a key plan cannot load.
 func TestOrderRejectsAnUnknownResource(t *testing.T) {
-	if _, err := order([]string{"rulesets", "ruleset"}); err == nil {
+	_, err := order([]string{"rulesets", "ruleset"})
+	if err == nil {
 		t.Fatal("order accepted an unknown resource")
+	}
+	// The message has to say what the answer could have been, since that is
+	// the whole of what the caller has to go on.
+	for _, key := range append(resourceKeys(), allKeyword) {
+		if !strings.Contains(err.Error(), key) {
+			t.Errorf("error does not name %q: %v", key, err)
+		}
 	}
 	if _, err := order(resourceKeys()); err != nil {
 		t.Fatalf("order rejected a known resource: %v", err)

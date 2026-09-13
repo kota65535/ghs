@@ -231,8 +231,11 @@ func order(selected []string) ([]string, error) {
 		}
 	}
 
+	// The resources are named rather than only the bad one rejected: the set is
+	// short, and it is what the answer has to be drawn from.
 	if unknown := sortedKeys(wanted); len(unknown) > 0 {
-		return nil, fmt.Errorf("unknown resource %q", unknown[0])
+		return nil, fmt.Errorf("unknown resource %q (expected %q or any of: %s)",
+			unknown[0], allKeyword, strings.Join(resourceKeys(), ", "))
 	}
 	return ordered, nil
 }
