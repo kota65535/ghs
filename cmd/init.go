@@ -208,7 +208,7 @@ func generate(ctx context.Context, client resource.Client, repo resource.Repo, s
 		return nil, err
 	}
 
-	opts := options{describe: true, skipDefaults: skipDefaults}
+	opts := options{described: map[string]bool{}, skipDefaults: skipDefaults}
 	doc := &yaml.Node{Kind: yaml.MappingNode}
 
 	for _, key := range ordered {
@@ -228,14 +228,14 @@ func generate(ctx context.Context, client resource.Client, repo resource.Repo, s
 		}
 
 		node, _ := root.Child(key)
-		value, err := fetchNode(ctx, client, key, node, path.Child(node.Segment), opts)
+		value, err := fetchNode(ctx, client, key, node, path.Child(node.Segment), opts.scoping(key))
 		if err != nil {
 			return nil, err
 		}
 		if value == nil {
 			continue
 		}
-		put(doc, key, comment(node.Summary), value)
+		put(doc, key, opts.describe(key, node.Summary), value)
 	}
 
 	return render(repo, doc)
@@ -320,18 +320,15 @@ func fetchNode(ctx context.Context, client resource.Client, key string, node sch
 
 	for _, name := range node.ChildNames() {
 		child, _ := node.Child(name)
-		value, err := fetchNode(ctx, client, join(key, name), child, path.Child(child.Segment), opts)
+		value, err := fetchNode(ctx, client, join(key, name), child, path.Child(child.Segment),
+			opts.scoping(name))
 		if err != nil {
 			return nil, err
 		}
 		if value == nil {
 			continue
 		}
-		if opts.describe {
-			put(out, name, comment(child.Summary), value)
-		} else {
-			put(out, name, "", value)
-		}
+		put(out, name, opts.describe(name, child.Summary), value)
 	}
 
 	if len(out.Content) == 0 {
@@ -355,12 +352,8 @@ func fetchElements(ctx context.Context, client resource.Client, key string, node
 	}
 
 	out := &yaml.Node{Kind: yaml.SequenceNode}
-	for i, name := range sortedKeys(current) {
-		// Only the first element carries the commentary: what the fields of one
-		// are is a property of the collection, not of the element.
-		elementOpts := opts.describing(opts.describe && i == 0)
-
-		element, err := fieldsNode(key, node.Fields, current[name], elementOpts)
+	for _, name := range sortedKeys(current) {
+		element, err := fieldsNode(key, node.Fields, current[name], opts)
 		if err != nil {
 			return nil, err
 		}
@@ -373,18 +366,14 @@ func fetchElements(ctx context.Context, client resource.Client, key string, node
 			for _, childName := range node.ChildNames() {
 				child, _ := node.Child(childName)
 				value, err := fetchNode(ctx, client, join(diff.ElementPath(key, name), childName), child,
-					elementPath.Child(child.Segment), elementOpts)
+					elementPath.Child(child.Segment), opts.scoping(childName))
 				if err != nil {
 					return nil, err
 				}
 				if value == nil {
 					continue
 				}
-				if elementOpts.describe {
-					put(element, childName, comment(child.Summary), value)
-				} else {
-					put(element, childName, "", value)
-				}
+				put(element, childName, opts.describe(childName, child.Summary), value)
 			}
 		}
 
@@ -396,12 +385,26 @@ func fetchElements(ctx context.Context, client resource.Client, key string, node
 
 // options says how the settings are written.
 type options struct {
-	// describe says whether to write what the API description says about each
-	// key. It is false within an element that is written about already -- the
-	// second and later elements of a collection, and an array element of a
-	// variant seen earlier in the same array -- where the same commentary a
-	// second time would only push the settings apart.
-	describe bool
+	// described holds the keys written about already, shared by every options
+	// value derived from the one generate starts with.
+	//
+	// What the API description says about a key is written above the first
+	// occurrence of that key and nowhere else. The elements of a collection and
+	// of an array are the same keys over again, and the same commentary under
+	// every element would only push the settings apart.
+	//
+	// It is the key that is tracked rather than the element, since a field the
+	// first element leaves out is one nothing has been written about yet: an
+	// optional field, a null, or a default dropped by --skip-defaults. Wherever
+	// it first appears is where it is described.
+	described map[string]bool
+
+	// scope is where in the schema the keys being written sit, which is what
+	// the descriptions are tracked under. It follows the schema rather than the
+	// file: the elements of a collection are one scope, since they are the same
+	// keys, and the variants of an array field are one scope each, since what a
+	// deletion rule accepts is not what a pull request rule accepts.
+	scope string
 
 	// skipDefaults leaves out a field whose value is the one the API
 	// description documents as its default, which is what narrows the file down
@@ -409,10 +412,27 @@ type options struct {
 	skipDefaults bool
 }
 
-// describing returns the same options, writing the commentary or not.
-func (o options) describing(describe bool) options {
-	o.describe = describe
+// scoping returns the same options, writing about the keys below name.
+func (o options) scoping(name string) options {
+	o.scope = join(o.scope, name)
 	return o
+}
+
+// describe returns the comment to write above a key: what the API description
+// says the first time the key is written, and nothing on the times after.
+//
+// A key the description says nothing about is not recorded, so that a later
+// occurrence with something to say still says it.
+func (o options) describe(name, description string) string {
+	if description == "" {
+		return ""
+	}
+	key := join(o.scope, name)
+	if o.described[key] {
+		return ""
+	}
+	o.described[key] = true
+	return comment(description)
 }
 
 // isDefault reports a value that is what the field has unless it is set.
@@ -453,7 +473,7 @@ func fieldsNode(key string, fields map[string]schema.Field, current map[string]a
 
 		rendered := &yaml.Node{}
 		if nested, ok := value.(map[string]any); ok && len(field.Fields) > 0 {
-			filtered, err := fieldsNode(join(key, name), field.Fields, nested, opts)
+			filtered, err := fieldsNode(join(key, name), field.Fields, nested, opts.scoping(name))
 			if err != nil {
 				return nil, err
 			}
@@ -462,7 +482,7 @@ func fieldsNode(key string, fields map[string]schema.Field, current map[string]a
 			}
 			rendered = filtered
 		} else if items, ok := value.([]any); ok && len(field.Variants) > 0 {
-			filtered, err := elementsNode(join(key, name), items, field, opts)
+			filtered, err := elementsNode(join(key, name), items, field, opts.scoping(name))
 			if err != nil {
 				return nil, err
 			}
@@ -471,13 +491,9 @@ func fieldsNode(key string, fields map[string]schema.Field, current map[string]a
 			return nil, fmt.Errorf("render %s: %w", join(key, name), err)
 		}
 
-		if opts.describe {
-			put(out, name, comment(field.Description), rendered)
-		} else {
-			// Nothing is written about these, so there is nothing for a blank
-			// line to keep apart.
-			put(out, name, "", rendered)
-		}
+		// A key written about already takes no comment, and so has nothing for
+		// a blank line to keep apart.
+		put(out, name, opts.describe(name, field.Description), rendered)
 	}
 
 	return out, nil
@@ -499,7 +515,6 @@ func fieldsNode(key string, fields map[string]schema.Field, current map[string]a
 // from the file, which apply then reads as a rule to delete.
 func elementsNode(key string, items []any, field schema.Field, opts options) (*yaml.Node, error) {
 	out := &yaml.Node{Kind: yaml.SequenceNode}
-	described := map[string]bool{}
 
 	for _, item := range items {
 		element, isMapping := item.(map[string]any)
@@ -512,13 +527,11 @@ func elementsNode(key string, items []any, field schema.Field, opts options) (*y
 				key, element["type"])
 		}
 
-		// Each variant is written about once. The bypass actors of a ruleset are
-		// all the one shape, so the second of them repeating what an actor id is
-		// only pushes the actors apart; its rules are not, so a rule of a type
-		// not yet seen is written with what that type accepts.
-		name := variantName(field, element)
-		elementOpts := opts.describing(opts.describe && !described[name])
-		described[name] = true
+		// Each variant is written about on its own. The bypass actors of a
+		// ruleset are all the one shape, so the second of them repeating what an
+		// actor id is only pushes the actors apart; its rules are not, so a rule
+		// of a type not yet seen is written with what that type accepts.
+		elementOpts := opts.scoping(variantName(field, element))
 
 		rendered, err := fieldsNode(key, variant.Fields, element, elementOpts)
 		if err != nil {
@@ -526,9 +539,11 @@ func elementsNode(key string, items []any, field schema.Field, opts options) (*y
 		}
 		// What the element as a whole is goes above its first key, which is the
 		// line that opens the element.
-		if elementOpts.describe && variant.Description != "" && len(rendered.Content) > 0 {
-			first := rendered.Content[0]
-			first.HeadComment = joinComments(comment(variant.Description), first.HeadComment)
+		if len(rendered.Content) > 0 {
+			if about := elementOpts.describe("", variant.Description); about != "" {
+				first := rendered.Content[0]
+				first.HeadComment = joinComments(about, first.HeadComment)
+			}
 		}
 		out.Content = append(out.Content, rendered)
 	}

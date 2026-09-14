@@ -408,6 +408,35 @@ func TestGenerateWritesEachVariantOnce(t *testing.T) {
 	}
 }
 
+// TestGenerateDescribesAFieldTheFirstElementLeavesOut checks that what is
+// written about follows the keys rather than the elements: a field the first
+// element of an array has nothing for is one nothing has been written about
+// yet, so the element that does have it is where it is described.
+func TestGenerateDescribesAFieldTheFirstElementLeavesOut(t *testing.T) {
+	client := &fakeClient{reads: map[string]string{
+		"repos/kota65535/ghs/rulesets": `[{"id": 7, "name": "protect-main"}]`,
+		"repos/kota65535/ghs/rulesets/7": `{"id": 7, "name": "protect-main", "target": "branch",
+			"enforcement": "active",
+			"rules": [{"type": "required_status_checks", "parameters": {
+				"required_status_checks": [
+					{"context": "build"},
+					{"context": "lint", "integration_id": 2740}]}}]}`,
+	}}
+
+	settings, err := generate(context.Background(), client, testRepo, []string{"rulesets"}, false)
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+
+	got := string(settings)
+	if !strings.Contains(got, "integration_id: 2740") {
+		t.Fatalf("want the integration id written:\n%s", got)
+	}
+	if !strings.Contains(got, "integration ID that this status check must originate from") {
+		t.Errorf("the integration id is written with nothing said about it:\n%s", got)
+	}
+}
+
 // TestGenerateWritesNumbersAsNumbers checks that the whole numbers the API
 // reports are written as integers however deep they sit, rather than as the
 // float64 JSON decoding leaves them: an actor id spelled 1.312304e+06 is not
