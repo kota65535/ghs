@@ -9,7 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/charmbracelet/huh"
+	"charm.land/huh/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/kota65535/ghs/internal/config"
 )
@@ -226,8 +227,10 @@ func TestTheResourcePromptStartsFullySelected(t *testing.T) {
 		Value(&selected)
 
 	// The marker is the theme's, so what is checked is that every option is
-	// rendered the same way as the others and that none of them is bare.
-	view := field.View()
+	// rendered the same way as the others and that none of them is bare. The
+	// styling is stripped first, since the theme colours the marker and the
+	// label separately and so writes an escape sequence between them.
+	view := ansi.Strip(field.View())
 	for _, key := range resourceKeys() {
 		if !strings.Contains(view, "✓ "+key) {
 			t.Errorf("option %q does not start selected:\n%s", key, view)
