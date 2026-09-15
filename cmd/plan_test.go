@@ -147,6 +147,34 @@ actions:
 	}
 }
 
+// TestPlanCreatesARulesetThatIsNotThereYet covers a collection addressed by an
+// ID that GitHub issues: a ruleset that exists only in the settings file has no
+// ID to be addressed by, which must not stop it from being planned.
+func TestPlanCreatesARulesetThatIsNotThereYet(t *testing.T) {
+	client := &fakeClient{reads: map[string]string{
+		"repos/kota65535/ghs/rulesets": `[]`,
+	}}
+
+	p := planFor(t, client, `
+rulesets:
+  - name: apply-dev
+    target: branch
+    enforcement: active
+`)
+
+	if got := p.plan.Summarize(); got.Created != 1 {
+		t.Errorf("summary = %+v, want one ruleset added", got)
+	}
+
+	var out bytes.Buffer
+	if err := apply(context.Background(), &out, p, diff.FormatText); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	if got, want := client.calls(), []string{"POST repos/kota65535/ghs/rulesets"}; len(got) != 1 || got[0] != want[0] {
+		t.Errorf("made %v, want %v", got, want)
+	}
+}
+
 func TestApplyWritesEachNodeToItsOwnEndpoint(t *testing.T) {
 	client := &fakeClient{reads: map[string]string{
 		"repos/kota65535/ghs":                              `{"has_issues": false}`,

@@ -174,14 +174,18 @@ func planElements(ctx context.Context, client resource.Client, key string, decla
 
 		// What is declared under an element is planned against that element's
 		// own path, and only for an element that is or will be there.
-		if match.Action != diff.ActionDelete {
+		// An element with nothing declared under it needs no path of its own,
+		// which is what lets a collection addressed by an ID GitHub has not
+		// issued yet be created at all.
+		childNames := declared.ElementChildNames(match.Name)
+		if match.Action != diff.ActionDelete && len(childNames) > 0 {
 			elementPath, err := elementPath(collection, path, match)
 			if err != nil {
 				return err
 			}
 			// What an element being created holds is arriving with it, so
 			// there is nothing to read below it yet.
-			for _, name := range declared.ElementChildNames(match.Name) {
+			for _, name := range childNames {
 				child, _ := declared.ElementChild(match.Name, name)
 				childPlan, err := planNode(ctx, client, join(match.Path, name), child,
 					elementPath.Child(child.Node.Segment), match.Action != diff.ActionCreate)
