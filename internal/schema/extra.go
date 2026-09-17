@@ -66,16 +66,17 @@ var extraNodes = map[string]map[string]Node{
 		// and the plainest of them to read: GET answers 200 with the flag, so
 		// resource.PrivateVulnerabilityReporting says nothing about reading.
 		//
-		// Conditional, because the description gives the endpoint a 422 as
-		// well: where the setting has no place in the repository, that is the
-		// answer, and a declaration against it reads as a change with nothing
-		// on the other side rather than failing the run.
+		// Not conditional, though the description gives the endpoint a 422 as
+		// well. That 422 is the shared bad_request response rather than a way
+		// of saying the setting has no place here, and conditional handling
+		// would turn it into an empty current state: init would leave the
+		// setting out, plan would report a change against nothing, and only
+		// apply would fail. A failed read is worth failing on.
 		"private-vulnerability-reporting": {
-			Kind:        KindObject,
-			Segment:     "private-vulnerability-reporting",
-			Method:      "PUT",
-			Summary:     "Enable private vulnerability reporting for a repository",
-			Conditional: true,
+			Kind:    KindObject,
+			Segment: "private-vulnerability-reporting",
+			Method:  "PUT",
+			Summary: "Enable private vulnerability reporting for a repository",
 			Fields: map[string]Field{
 				"enabled": {
 					Type:        "boolean",

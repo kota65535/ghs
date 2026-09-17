@@ -516,7 +516,11 @@ Dependabot security updates（`automated-security-fixes`）と紛らわしいが
 | `automated-security-fixes` | 200 + `{"enabled": ..., "paused": ...}`、ただし 404 もあり得る | 404 を無効と解釈 |
 | `vulnerability-alerts` | 204 / 404、本文なし | ステータスだけを見る |
 
-`private-vulnerability-reporting` は `Conditional` にしてある。記述が 422 を挙げており、設定がそのリポジトリに当てはまらない場合の答えがそれになる。汎用の読み取りは `Conditional` なノードに限って 409 と 422 を「ここには読むものがない」として扱うので、宣言は何もない相手への変更として出る——実行が失敗するのではなく。
+`private-vulnerability-reporting` の記述は 200 と並んで 422 を挙げているが、`Conditional` にはしていない。汎用の読み取りは `Conditional` なノードに限って 409 と 422 を「ここには読むものがない」として扱うので、印を付ければこの 422 も飲み込まれる。飲み込んで良いのは「この設定はこのリポジトリに存在しない」を意味する答えだけで、ここの 422 は共通の `bad_request` を参照しているにすぎない。
+
+読めなかったものを「無効」や「無い」として扱うと、被害はその場では出ない。`init` はその設定をファイルから落とし、`plan` は誰も読んでいない状態に対する変更を出し、`apply` が書き込みで初めて失敗する。読み取りの失敗は読み取りの時点で失敗させる。
+
+`fork-pr-contributor-approval` や `selected-actions` に `Conditional` が付いているのは、パスそのものが条件付きで存在しないと記述が言っているからで、ステータスコードが一致していることが理由ではない。
 
 ### topics の順序
 
