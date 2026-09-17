@@ -78,7 +78,8 @@ func applyNode(ctx context.Context, client resource.Client, key string, declared
 		// The whole declaration is sent, not only the differing fields: the
 		// request is idempotent, and sending what the file says keeps what is
 		// applied identical to what was reviewed.
-		if err := resource.ObjectFor(key).Apply(ctx, client, node, path, declared.Fields); err != nil {
+		object := resource.ObjectFor(key)
+		if err := object.Apply(ctx, client, node, path, object.Normalize(node, declared.Fields)); err != nil {
 			return err
 		}
 	}

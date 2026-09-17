@@ -135,6 +135,17 @@ Each key is the endpoint that writes the fields under it, which is what keeps `d
 
 Some of these only exist under certain conditions — the allowed actions are listed only while `allowed_actions` is `selected`. Declare one where it does not apply and the plan shows it as a change against nothing, rather than failing the run.
 
+## Topics
+
+The repository response reports `topics`, and `PATCH /repos/{owner}/{repo}` does not accept them: they have an endpoint of their own, so they are written under the key that names it.
+
+```yaml
+topics:                        # /repos/{owner}/{repo}/topics
+  names: [cli, github, go]
+```
+
+`names` is the whole set: what it leaves out is removed, and `[]` clears them. GitHub stores topics lowercased and sorted, and ghs compares them in that form, so `[Go, cli]` and `[cli, go]` are the same declaration rather than a change that never settles.
+
 ## Rulesets, variables and environments
 
 These are sets of named things rather than one object, so they are written as a list. Each entry is the body that creates one, with `name` identifying it:
