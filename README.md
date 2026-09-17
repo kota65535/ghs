@@ -146,6 +146,17 @@ topics:                        # /repos/{owner}/{repo}/topics
 
 `names` is the whole set: what it leaves out is removed, and `[]` clears them. GitHub stores topics lowercased and sorted, and ghs compares them in that form, so `[Go, cli]` and `[cli, go]` are the same declaration rather than a change that never settles.
 
+## Dependabot security updates
+
+The repository response reports this one under `security_and_analysis.dependabot_security_updates`, and a `PATCH` there ignores it. It is declared against the endpoint that does write it:
+
+```yaml
+automated-security-fixes:      # .../automated-security-fixes
+  enabled: true
+```
+
+That endpoint takes no body at all — it turns the setting on with `PUT` and off with `DELETE` — so `enabled` is not a field being sent anywhere. It picks which of the two requests apply makes.
+
 ## Rulesets, variables and environments
 
 These are sets of named things rather than one object, so they are written as a list. Each entry is the body that creates one, with `name` identifying it:
