@@ -230,6 +230,40 @@ func deleteAt(ctx context.Context, c Client, path string) error {
 	return c.DoWithContext(ctx, http.MethodDelete, path, nil, nil)
 }
 
+// enabledField is what a node standing for an endpoint that is only an on and
+// an off declares. The name is ghs's own: such an endpoint takes no request
+// body, so there is no field in the API description to borrow it from.
+const enabledField = "enabled"
+
+// applyToggle sends the request that stands for the declared value. An
+// endpoint whose whole shape is an on and an off turns the setting on with PUT
+// and off with DELETE, and neither request carries a body, so the declared
+// value is not sent anywhere: it chooses the method.
+func applyToggle(ctx context.Context, c Client, path Path, desired map[string]any) error {
+	enabled, ok := desired[enabledField].(bool)
+	if !ok {
+		// There are two requests and nothing else to send -- a null, which
+		// elsewhere means "clear this field", has no request to be sent as.
+		return fmt.Errorf("%s: %s must be true or false, got %v", path, enabledField, desired[enabledField])
+	}
+
+	method := http.MethodPut
+	if !enabled {
+		method = http.MethodDelete
+	}
+	if err := c.DoWithContext(ctx, method, path.String(), nil, nil); err != nil {
+		return fmt.Errorf("%s %s: %w", method, path, err)
+	}
+	return nil
+}
+
+// isNotFound reports an error that is the API saying there is nothing here,
+// rather than one that means the request failed.
+func isNotFound(err error) bool {
+	var httpErr *api.HTTPError
+	return errors.As(err, &httpErr) && httpErr.StatusCode == http.StatusNotFound
+}
+
 // doesNotApply reports an error that means the setting has no place in this
 // repository, rather than one that means the request failed.
 //

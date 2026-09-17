@@ -494,13 +494,21 @@ actions:              # 子パス
 
 `has_pages` は Pages API が作成に POST、更新に PUT を使い、未有効なら GET が 404 を返す。Object 1 つで表せる形ではないので、必要になったときに考える。
 
+### GET にすら現れない設定
+
+Dependabot alerts は上の表に入らない。リポジトリのレスポンスはこの設定を報告しない——`security_and_analysis` にも、トップレベルにも、`full-repository` スキーマにも項目がない——ので、現在値を知る方法は `GET /repos/{owner}/{repo}/vulnerability-alerts` を叩くことだけになる。
+
+そしてその GET はボディを返さない。有効なら 204、無効なら 404 で、状態はステータスコードそのものが答える。`vulnerability-alerts:` ノードがそう読むのはこのためで、ghs の中でフィールドではなくステータスを現在値にする唯一の箇所になる。
+
+Dependabot security updates（`automated-security-fixes`）と紛らわしいが別の設定で、エンドポイントの形も違う。あちらの GET は 200 で `{"enabled": ..., "paused": ...}` を返し、404 は Dependabot がそのリポジトリで有効でない場合にだけ現れる。alerts が検知、security updates が検知後の自動 PR という関係で、alerts を切れば security updates も動かない。その依存は API 側が拒否しないので、ghs も両方の宣言をそのまま送る。
+
 ### リクエストボディを持たないエンドポイント
 
-`automated-security-fixes` は有効化が `PUT`、無効化が `DELETE` で、どちらもボディを取らない。ノードはリクエストボディのスキーマから生成する仕組みなので、生成する材料がない。`extraNodes` に手で書くのはそのためで、`enabled` は API のフィールドではなく ghs が付けた名前になる。
+`automated-security-fixes` と `vulnerability-alerts` は、どちらも有効化が `PUT`、無効化が `DELETE` で、いずれもボディを取らない。ノードはリクエストボディのスキーマから生成する仕組みなので、生成する材料がない。`extraNodes` に手で書くのはそのためで、`enabled` は API のフィールドではなく ghs が付けた名前になる。
 
 フィールドの欠落を埋める `extraFields` より重い記述になる——生成されたノードは API が受け付けるものを述べ、手書きのノードは ghs が決めた呼び方を述べる——ので、エンドポイント全体が on/off に尽きる場合に限る。それより複雑なものは `gen/main.go` の `operations` の側の問題として扱う。
 
-どちらのリクエストを送るかは宣言された値で決まる。`resource.AutomatedSecurityFixes` がそれを引き受け、読み取りは GET がそのまま `{"enabled": ..., "paused": ...}` を返すので汎用の実装で足りる。
+どちらのリクエストを送るかは宣言された値で決まる。送る側は 2 つの設定で同じなので `applyToggle` が引き受け、違うのは読み取りの側だけになる。`automated-security-fixes` は 200 の本文を読んで 404 だけを無効と解釈し、`vulnerability-alerts` は 204 と 404 のどちらが返るかだけを見る。
 
 ### topics の順序
 

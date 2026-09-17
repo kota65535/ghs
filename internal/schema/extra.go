@@ -60,6 +60,25 @@ var extraNodes = map[string]map[string]Node{
 				},
 			},
 		},
+
+		// Dependabot alerts are the same pair of bodyless requests on
+		// /repos/{owner}/{repo}/vulnerability-alerts. This one is not reported
+		// in the repository response at all: what it is now is the answer to a
+		// GET on the path, which is a 204 or a 404 rather than a field.
+		// resource.VulnerabilityAlerts reads that.
+		"vulnerability-alerts": {
+			Kind:    KindObject,
+			Segment: "vulnerability-alerts",
+			Method:  "PUT",
+			Summary: "Enable vulnerability alerts",
+			Fields: map[string]Field{
+				"enabled": {
+					Type:        "boolean",
+					Description: "Either `true` to enable Dependabot alerts for this repository, or `false` to disable them.",
+					Default:     false,
+				},
+			},
+		},
 	},
 }
 

@@ -119,6 +119,7 @@ graph TD
     OG0 -->|なし| OG["GenericObject<br/>GET + schema の Method"]
     OG0 -->|topics| TP["Topics<br/>宣言を保存形へ正規化<br/>小文字化してソート"]
     OG0 -->|automated-security-fixes| SF["AutomatedSecurityFixes<br/>ボディなし<br/>enabled が PUT / DELETE を選ぶ"]
+    OG0 -->|vulnerability-alerts| VA["VulnerabilityAlerts<br/>ボディなし<br/>GET の 204 / 404 が現在値"]
     CO --> CG{"key に特殊実装は？"}
     CG -->|なし| GC["GenericCollection<br/>name でアドレス"]
     CG -->|rulesets| RS["Rulesets<br/>サーバ発行 id でアドレス<br/>要素ごとに個別 GET"]
@@ -128,6 +129,7 @@ graph TD
     style GC fill:#e6f4ea
     style TP fill:#fef7e0
     style SF fill:#fef7e0
+    style VA fill:#fef7e0
     style RS fill:#fef7e0
     style EN fill:#fef7e0
 ```
@@ -159,6 +161,6 @@ graph TD
 | 設定ファイルの検証規則 | `internal/config/config.go`, `collection.go` |
 | 比較のセマンティクス（配列、null、欠落） | `internal/diff/diff.go` |
 | plan の見た目 | `internal/diff/render.go` |
-| API 呼び出しの特殊対応 | `internal/resource/rulesets.go`, `environments.go`, `topics.go`, `security_fixes.go` |
+| API 呼び出しの特殊対応 | `internal/resource/rulesets.go`, `environments.go`, `topics.go`, `security_fixes.go`, `vulnerability_alerts.go` |
 | spec の欠落を埋める | `internal/schema/extra.go` |
 | リクエストボディを持たない設定を足す | `internal/schema/extra.go` の `extraNodes` と `internal/resource` の Object |
