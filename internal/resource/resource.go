@@ -125,9 +125,10 @@ type Collection interface {
 // file.
 var (
 	objects = map[string]Object{
-		"automated-security-fixes": AutomatedSecurityFixes{},
-		"topics":                   Topics{},
-		"vulnerability-alerts":     VulnerabilityAlerts{},
+		"automated-security-fixes":        AutomatedSecurityFixes{},
+		"private-vulnerability-reporting": PrivateVulnerabilityReporting{},
+		"topics":                          Topics{},
+		"vulnerability-alerts":            VulnerabilityAlerts{},
 	}
 
 	collections = map[string]Collection{
