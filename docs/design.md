@@ -486,13 +486,21 @@ actions:              # 子パス
 | 項目 | 書き込み先 | ghs での扱い |
 | --- | --- | --- |
 | `topics` | `PUT /repos/{owner}/{repo}/topics` | `topics:` ノード（`operations` の 1 行） |
-| `security_and_analysis.dependabot_security_updates` | `PUT` / `DELETE /repos/{owner}/{repo}/automated-security-fixes` | 未対応（リクエストボディを持たないので生成できない） |
+| `security_and_analysis.dependabot_security_updates` | `PUT` / `DELETE /repos/{owner}/{repo}/automated-security-fixes` | `automated-security-fixes:` ノード（`extraNodes` と専用 Object） |
 | `security_and_analysis.secret_scanning_validity_checks` | code security configurations（組織側） | 管理しない |
 | `has_pages` | Pages API | 管理しない |
 
 `secret_scanning_validity_checks` は PATCH に渡しても 200 が返るが、値は変わらない。存在しないフィールドを渡したときと同じ挙動で、受け付けているわけではない（`secret_scanning` に同じことをすると 400 になる）。黙って無視される設定を管理下に置くと、plan は変更を出し、apply は成功し、次の plan がまた同じ変更を出す。だから書かない。
 
 `has_pages` は Pages API が作成に POST、更新に PUT を使い、未有効なら GET が 404 を返す。Object 1 つで表せる形ではないので、必要になったときに考える。
+
+### リクエストボディを持たないエンドポイント
+
+`automated-security-fixes` は有効化が `PUT`、無効化が `DELETE` で、どちらもボディを取らない。ノードはリクエストボディのスキーマから生成する仕組みなので、生成する材料がない。`extraNodes` に手で書くのはそのためで、`enabled` は API のフィールドではなく ghs が付けた名前になる。
+
+フィールドの欠落を埋める `extraFields` より重い記述になる——生成されたノードは API が受け付けるものを述べ、手書きのノードは ghs が決めた呼び方を述べる——ので、エンドポイント全体が on/off に尽きる場合に限る。それより複雑なものは `gen/main.go` の `operations` の側の問題として扱う。
+
+どちらのリクエストを送るかは宣言された値で決まる。`resource.AutomatedSecurityFixes` がそれを引き受け、読み取りは GET がそのまま `{"enabled": ..., "paused": ...}` を返すので汎用の実装で足りる。
 
 ### topics の順序
 

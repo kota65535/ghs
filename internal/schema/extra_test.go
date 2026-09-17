@@ -95,6 +95,44 @@ func TestMergingDoesNotMutateTheGeneratedDescription(t *testing.T) {
 	}
 }
 
+func TestExtraNodesAreMergedIn(t *testing.T) {
+	for key, nodes := range extraNodes {
+		parent, ok := nodeAt(key)
+		if !ok {
+			t.Errorf("%q holds hand-written nodes but is not a node", key)
+			continue
+		}
+		for name, want := range nodes {
+			got, ok := parent.Child(name)
+			if !ok {
+				t.Errorf("%s: %s was not merged in", or(key), name)
+				continue
+			}
+			if got.Method != want.Method || got.Segment != want.Segment {
+				t.Errorf("%s: %s is %s %q, want %s %q",
+					or(key), name, got.Method, got.Segment, want.Method, want.Segment)
+			}
+		}
+	}
+}
+
+func TestExtraNodesAreStillMissingFromTheDescription(t *testing.T) {
+	// A hand-written node names a setting the generator could not reach. Once
+	// the description gains an operation for it, the entry in gen/main.go is
+	// the place for it and this one is stale.
+	for key, nodes := range extraNodes {
+		parent, ok := generatedAt(key)
+		if !ok {
+			continue
+		}
+		for name := range nodes {
+			if _, described := parent.Child(name); described {
+				t.Errorf("%s: %s is now generated; delete it from extraNodes", or(key), name)
+			}
+		}
+	}
+}
+
 func TestEveryCollectionGainsItsNameField(t *testing.T) {
 	// The name is added to every collection during the merge, so a collection
 	// GitHub adds later gets one without anybody remembering to say so.

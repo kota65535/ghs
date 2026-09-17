@@ -25,6 +25,44 @@ var extraFields = map[string]map[string]Field{
 	},
 }
 
+// extraNodes describes settings the generator has nothing to generate from:
+// endpoints that take no request body at all, so the field that stands for
+// them is ghs's own invention rather than the API's.
+//
+// The keys are the path down to the parent of each node, as in extraFields.
+//
+// This is a heavier statement than a patched field -- a generated node states
+// what the API accepts, one written here states what ghs decided to call it --
+// so an entry needs an endpoint whose whole shape is the on/off it is written
+// as. Anything richer belongs in operations in gen/main.go instead.
+var extraNodes = map[string]map[string]Node{
+	"": {
+		// Dependabot security updates are turned on with PUT and off with
+		// DELETE on /repos/{owner}/{repo}/automated-security-fixes, neither of
+		// which takes a body, so there is no request schema to generate a
+		// field from. The repository response reports the setting under
+		// security_and_analysis.dependabot_security_updates, but PATCH
+		// /repos/{owner}/{repo} ignores it there.
+		//
+		// Method is the enabling one. Which of the two a change actually sends
+		// follows from the declared value, which is what
+		// resource.AutomatedSecurityFixes is for.
+		"automated-security-fixes": {
+			Kind:    KindObject,
+			Segment: "automated-security-fixes",
+			Method:  "PUT",
+			Summary: "Enable Dependabot security updates",
+			Fields: map[string]Field{
+				"enabled": {
+					Type:        "boolean",
+					Description: "Either `true` to enable Dependabot security updates for this repository, or `false` to disable them.",
+					Default:     false,
+				},
+			},
+		},
+	},
+}
+
 // root is what the rest of ghs sees: the generated description with the
 // patched fields merged in, and with the name every collection element carries.
 var root = build()
@@ -68,6 +106,22 @@ func patch(node *Node, path string) {
 	}
 
 	node.Fields = fields
+
+	// The hand-written nodes join the generated ones before the walk goes on,
+	// so that one of them is patched like any other node below this point.
+	if extra := extraNodes[path]; len(extra) > 0 {
+		nodes := make(map[string]Node, len(node.Nodes)+len(extra))
+		for name, child := range node.Nodes {
+			nodes[name] = child
+		}
+		for name, child := range extra {
+			if _, described := nodes[name]; described {
+				continue
+			}
+			nodes[name] = child
+		}
+		node.Nodes = nodes
+	}
 
 	if len(node.Nodes) == 0 {
 		return

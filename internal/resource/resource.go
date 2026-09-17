@@ -125,7 +125,8 @@ type Collection interface {
 // file.
 var (
 	objects = map[string]Object{
-		"topics": Topics{},
+		"automated-security-fixes": AutomatedSecurityFixes{},
+		"topics":                   Topics{},
 	}
 
 	collections = map[string]Collection{
