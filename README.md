@@ -146,16 +146,23 @@ topics:                        # /repos/{owner}/{repo}/topics
 
 `names` is the whole set: what it leaves out is removed, and `[]` clears them. GitHub stores topics lowercased and sorted, and ghs compares them in that form, so `[Go, cli]` and `[cli, go]` are the same declaration rather than a change that never settles.
 
-## Dependabot security updates
+## Dependabot alerts and security updates
 
-The repository response reports this one under `security_and_analysis.dependabot_security_updates`, and a `PATCH` there ignores it. It is declared against the endpoint that does write it:
+Two settings, two endpoints, neither of them writable through `PATCH /repos/{owner}/{repo}`:
 
 ```yaml
+vulnerability-alerts:          # .../vulnerability-alerts
+  enabled: true                # Dependabot alerts: the scanning
+
 automated-security-fixes:      # .../automated-security-fixes
-  enabled: true
+  enabled: true                # Dependabot security updates: the pull requests
 ```
 
-That endpoint takes no body at all — it turns the setting on with `PUT` and off with `DELETE` — so `enabled` is not a field being sent anywhere. It picks which of the two requests apply makes.
+Alerts are what finds a vulnerable dependency; security updates are what opens the pull request that bumps it. Turning alerts off stops both, and nothing here refuses the combination that says otherwise — the API does not either.
+
+Neither endpoint takes a request body: `PUT` turns the setting on, `DELETE` turns it off. So `enabled` is not a field being sent anywhere. It picks which of the two requests apply makes.
+
+They differ in how ghs reads them. `security_and_analysis.dependabot_security_updates` appears in the repository response, and the endpoint answers `200` with the flag. Alerts appear nowhere in that response at all: `GET .../vulnerability-alerts` answers `204` when they are on and `404` when they are off, and that status is the whole of the reply.
 
 ## Rulesets, variables and environments
 
