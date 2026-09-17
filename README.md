@@ -146,23 +146,32 @@ topics:                        # /repos/{owner}/{repo}/topics
 
 `names` is the whole set: what it leaves out is removed, and `[]` clears them. GitHub stores topics lowercased and sorted, and ghs compares them in that form, so `[Go, cli]` and `[cli, go]` are the same declaration rather than a change that never settles.
 
-## Dependabot alerts and security updates
+## Security settings written as an on and an off
 
-Two settings, two endpoints, neither of them writable through `PATCH /repos/{owner}/{repo}`:
+Three settings, three endpoints, none of them writable through `PATCH /repos/{owner}/{repo}`:
 
 ```yaml
-vulnerability-alerts:          # .../vulnerability-alerts
-  enabled: true                # Dependabot alerts: the scanning
+vulnerability-alerts:               # Dependabot alerts: the scanning
+  enabled: true
 
-automated-security-fixes:      # .../automated-security-fixes
-  enabled: true                # Dependabot security updates: the pull requests
+automated-security-fixes:           # Dependabot security updates: the pull requests
+  enabled: true
+
+private-vulnerability-reporting:    # letting researchers report privately
+  enabled: true
 ```
 
 Alerts are what finds a vulnerable dependency; security updates are what opens the pull request that bumps it. Turning alerts off stops both, and nothing here refuses the combination that says otherwise — the API does not either.
 
-Neither endpoint takes a request body: `PUT` turns the setting on, `DELETE` turns it off. So `enabled` is not a field being sent anywhere. It picks which of the two requests apply makes.
+None of the three endpoints takes a request body: `PUT` turns the setting on, `DELETE` turns it off. So `enabled` is not a field being sent anywhere. It picks which of the two requests apply makes.
 
-They differ in how ghs reads them. `security_and_analysis.dependabot_security_updates` appears in the repository response, and the endpoint answers `200` with the flag. Alerts appear nowhere in that response at all: `GET .../vulnerability-alerts` answers `204` when they are on and `404` when they are off, and that status is the whole of the reply.
+What differs is how each answers a read, which is why all three are written out rather than generated:
+
+| | the read | in the repository response |
+| --- | --- | --- |
+| `private-vulnerability-reporting` | `200` with the flag | no |
+| `automated-security-fixes` | `200` with the flag, `404` where Dependabot is off | as `security_and_analysis.dependabot_security_updates` |
+| `vulnerability-alerts` | `204` on, `404` off, no body either way | no |
 
 ## Rulesets, variables and environments
 

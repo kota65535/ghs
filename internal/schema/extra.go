@@ -61,6 +61,30 @@ var extraNodes = map[string]map[string]Node{
 			},
 		},
 
+		// Private vulnerability reporting is the same pair of bodyless
+		// requests on /repos/{owner}/{repo}/private-vulnerability-reporting,
+		// and the plainest of them to read: GET answers 200 with the flag, so
+		// resource.PrivateVulnerabilityReporting says nothing about reading.
+		//
+		// Conditional, because the description gives the endpoint a 422 as
+		// well: where the setting has no place in the repository, that is the
+		// answer, and a declaration against it reads as a change with nothing
+		// on the other side rather than failing the run.
+		"private-vulnerability-reporting": {
+			Kind:        KindObject,
+			Segment:     "private-vulnerability-reporting",
+			Method:      "PUT",
+			Summary:     "Enable private vulnerability reporting for a repository",
+			Conditional: true,
+			Fields: map[string]Field{
+				"enabled": {
+					Type:        "boolean",
+					Description: "Either `true` to allow security researchers to report vulnerabilities privately through this repository, or `false` to disallow it.",
+					Default:     false,
+				},
+			},
+		},
+
 		// Dependabot alerts are the same pair of bodyless requests on
 		// /repos/{owner}/{repo}/vulnerability-alerts. This one is not reported
 		// in the repository response at all: what it is now is the answer to a

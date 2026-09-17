@@ -508,7 +508,15 @@ Dependabot security updates（`automated-security-fixes`）と紛らわしいが
 
 フィールドの欠落を埋める `extraFields` より重い記述になる——生成されたノードは API が受け付けるものを述べ、手書きのノードは ghs が決めた呼び方を述べる——ので、エンドポイント全体が on/off に尽きる場合に限る。それより複雑なものは `gen/main.go` の `operations` の側の問題として扱う。
 
-どちらのリクエストを送るかは宣言された値で決まる。送る側は 2 つの設定で同じなので `applyToggle` が引き受け、違うのは読み取りの側だけになる。`automated-security-fixes` は 200 の本文を読んで 404 だけを無効と解釈し、`vulnerability-alerts` は 204 と 404 のどちらが返るかだけを見る。
+どちらのリクエストを送るかは宣言された値で決まる。送る側はどの設定でも同じなので `applyToggle` が引き受け、違うのは読み取りの側だけになる。同じ「on と off」でも GET の答え方が三者三様であることが、この形の設定の厄介なところになっている。
+
+| ノード | GET の答え | 読み取りの実装 |
+| --- | --- | --- |
+| `private-vulnerability-reporting` | 200 + `{"enabled": ...}` | 汎用のまま |
+| `automated-security-fixes` | 200 + `{"enabled": ..., "paused": ...}`、ただし 404 もあり得る | 404 を無効と解釈 |
+| `vulnerability-alerts` | 204 / 404、本文なし | ステータスだけを見る |
+
+`private-vulnerability-reporting` は `Conditional` にしてある。記述が 422 を挙げており、設定がそのリポジトリに当てはまらない場合の答えがそれになる。汎用の読み取りは `Conditional` なノードに限って 409 と 422 を「ここには読むものがない」として扱うので、宣言は何もない相手への変更として出る——実行が失敗するのではなく。
 
 ### topics の順序
 
