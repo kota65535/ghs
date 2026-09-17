@@ -66,6 +66,39 @@ func TestAutomatedSecurityFixesRefusesAValueThatIsNotTrueOrFalse(t *testing.T) {
 	}
 }
 
+func TestAutomatedSecurityFixesReadsA404AsDisabled(t *testing.T) {
+	// "Not Found if Dependabot is not enabled for the repository" is the API
+	// describing a state, not a read that failed. Passing it on as an error
+	// would fail every plan against such a repository.
+	rec := newRecorder(t, nil).fails("GET /repos/kota65535/ghs/automated-security-fixes", http.StatusNotFound)
+	srv := rec.server()
+	defer srv.Close()
+
+	current, err := AutomatedSecurityFixes{}.Fetch(context.Background(), newTestClient(t, srv),
+		securityFixesNode, securityFixesPath())
+	if err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+	if current["enabled"] != false {
+		t.Errorf("current = %+v, want enabled false", current)
+	}
+}
+
+func TestAutomatedSecurityFixesPassesOnAFailedRead(t *testing.T) {
+	// Only the 404 is an answer. Anything else is the request going wrong, and
+	// reporting it as "disabled" would plan a change against a state nobody
+	// read.
+	rec := newRecorder(t, nil).fails("GET /repos/kota65535/ghs/automated-security-fixes", http.StatusInternalServerError)
+	srv := rec.server()
+	defer srv.Close()
+
+	_, err := AutomatedSecurityFixes{}.Fetch(context.Background(), newTestClient(t, srv),
+		securityFixesNode, securityFixesPath())
+	if err == nil {
+		t.Fatal("Fetch succeeded on a 500, want the error passed on")
+	}
+}
+
 func TestAutomatedSecurityFixesReadsTheEnabledFlag(t *testing.T) {
 	rec := newRecorder(t, map[string]string{
 		"GET /repos/kota65535/ghs/automated-security-fixes": `{"enabled": true, "paused": false}`,
