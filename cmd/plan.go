@@ -118,15 +118,20 @@ func planNode(ctx context.Context, client resource.Client, key string, declared 
 	} else if node.Writable() && len(declared.Fields) > 0 {
 		// A namespace has no fields of its own, and a node nobody declared
 		// anything for is not read at all.
+		object := resource.ObjectFor(key)
+
 		var current map[string]any
 		if reachable {
-			read, err := resource.ObjectFor(key).Fetch(ctx, client, node, path)
+			read, err := object.Fetch(ctx, client, node, path)
 			if err != nil {
 				return nil, err
 			}
 			current = read
 		}
-		plan.Fields = diff.Compute(current, declared.Fields)
+		// The declaration is compared in the form GitHub stores it, which is
+		// also the form apply sends, so that a plan reports only what applying
+		// it actually changes.
+		plan.Fields = diff.Compute(current, object.Normalize(node, declared.Fields))
 	}
 
 	for _, name := range declared.ChildNames() {

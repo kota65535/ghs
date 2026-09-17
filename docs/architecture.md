@@ -115,7 +115,9 @@ graph TD
     Q -->|オブジェクト| O["ObjectFor(key)"]
     Q -->|コレクション| CO["CollectionFor(key)"]
 
-    O --> OG["GenericObject<br/>GET + schema の Method"]
+    O --> OG0{"key に特殊実装は？"}
+    OG0 -->|なし| OG["GenericObject<br/>GET + schema の Method"]
+    OG0 -->|topics| TP["Topics<br/>宣言を保存形へ正規化<br/>小文字化してソート"]
     CO --> CG{"key に特殊実装は？"}
     CG -->|なし| GC["GenericCollection<br/>name でアドレス"]
     CG -->|rulesets| RS["Rulesets<br/>サーバ発行 id でアドレス<br/>要素ごとに個別 GET"]
@@ -123,11 +125,14 @@ graph TD
 
     style OG fill:#e6f4ea
     style GC fill:#e6f4ea
+    style TP fill:#fef7e0
     style RS fill:#fef7e0
     style EN fill:#fef7e0
 ```
 
 緑が汎用（パスとメソッドだけで動く）、黄が手書き（GitHub が自分のパターンから外れる箇所）。新しい設定を足すとき、多くの場合 `gen/main.go` の `operations` に 1 行足すだけで済む。
+
+`Normalize` は Object だけが持つ。GitHub が受け取った値をそのまま保存しない設定——topics は小文字化してソートした形で保存される——では、書いたままの宣言と比較すると、apply しても次の plan で再び出る差分になる。保存される形に直してから比較し、同じ形で送ることでそれを断つ。
 
 ## 差分の木
 
@@ -152,5 +157,5 @@ graph TD
 | 設定ファイルの検証規則 | `internal/config/config.go`, `collection.go` |
 | 比較のセマンティクス（配列、null、欠落） | `internal/diff/diff.go` |
 | plan の見た目 | `internal/diff/render.go` |
-| API 呼び出しの特殊対応 | `internal/resource/rulesets.go`, `environments.go` |
+| API 呼び出しの特殊対応 | `internal/resource/rulesets.go`, `environments.go`, `topics.go` |
 | spec の欠落を埋める | `internal/schema/extra.go` |

@@ -414,5 +414,15 @@ var generated = Node{
 				"target": {Type: "string", Enum: []string{"branch", "push", "tag"}, Description: "The target of the ruleset", Default: "branch"},
 			},
 		},
+		"topics": Node{
+			Kind:    KindObject,
+			Segment: "topics",
+			Method:  "PUT",
+			Summary: "Replace all repository topics",
+			// from PUT /repos/{owner}/{repo}/topics
+			Fields: map[string]Field{
+				"names": {Type: "array", Description: "An array of topics to add to the repository. Pass one or more topics to _replace_ the set of existing topics. Send an empty array (`[]`) to clear all topics from the repository. **Note:** Topic `names` will be saved as lowercase."},
+			},
+		},
 	},
 }

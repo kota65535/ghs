@@ -479,7 +479,27 @@ actions:              # 子パス
 
 ファイル 1 つ = 1 リソースツリーのルートなので、organization の設定をやるなら別ファイルで `/orgs/{org}` をルートにする形になる。`repository:` / `organization:` というセクションで同一ファイルに同居させるより、スコープがファイル単位で分かれるほうが明快で、必要な token の権限も違う。
 
+## GET にだけ現れる設定
+
+`GET /repos/{owner}/{repo}` が報告する項目のうち、いくつかは `PATCH /repos/{owner}/{repo}` では書けない。専用のエンドポイントが持っているからで、リクエストボディのスキーマから生成する方針の裏返しでもある——受け付けないものは生成されない。
+
+| 項目 | 書き込み先 | ghs での扱い |
+| --- | --- | --- |
+| `topics` | `PUT /repos/{owner}/{repo}/topics` | `topics:` ノード（`operations` の 1 行） |
+| `security_and_analysis.dependabot_security_updates` | `PUT` / `DELETE /repos/{owner}/{repo}/automated-security-fixes` | 未対応（リクエストボディを持たないので生成できない） |
+| `security_and_analysis.secret_scanning_validity_checks` | code security configurations（組織側） | 管理しない |
+| `has_pages` | Pages API | 管理しない |
+
+`secret_scanning_validity_checks` は PATCH に渡しても 200 が返るが、値は変わらない。存在しないフィールドを渡したときと同じ挙動で、受け付けているわけではない（`secret_scanning` に同じことをすると 400 になる）。黙って無視される設定を管理下に置くと、plan は変更を出し、apply は成功し、次の plan がまた同じ変更を出す。だから書かない。
+
+`has_pages` は Pages API が作成に POST、更新に PUT を使い、未有効なら GET が 404 を返す。Object 1 つで表せる形ではないので、必要になったときに考える。
+
+### topics の順序
+
+GitHub は topics を小文字化し、ソートした形で保存する（`[Zebra, alpha, Mango]` を送ると `[alpha, mango, zebra]` が返る）。宣言をそのまま比較すると、apply が送った直後の plan がまた同じ差分を出す。`resource.Topics.Normalize` が保存される形に直してから比較と送信に回すことでこれを断つ。
+
+`diff` 側で配列を順序なしで比較する手もあったが、そちらは「配列は順序を含めて比較する」という既存の意味論を全ノードで変えてしまう。保存形が宣言形と違うのは topics の事実なので、topics の Object に置いた。
+
 ## Phase 3 以降
 
 - `teams`: 比較対象は `GET /orgs/{org}/teams/{slug}/repos` で確認できる**直接付与のみ**に限定する（継承・org ロール経由は対象外）
-- `topics`: `PUT /repos/{owner}/{repo}/topics` の別 API だが、リポジトリの状態なので `repository` の下に書く。順序に意味がない集合なので、比較には集合としての扱いが要る

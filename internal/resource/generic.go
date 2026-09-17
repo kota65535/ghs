@@ -18,6 +18,12 @@ import (
 // records, which is what most of GitHub's settings endpoints amount to.
 type GenericObject struct{}
 
+// Normalize implements Object. GitHub stores what it is sent, so there is
+// nothing to put into another form.
+func (GenericObject) Normalize(node schema.Node, desired map[string]any) map[string]any {
+	return desired
+}
+
 // Fetch implements Object.
 func (GenericObject) Fetch(ctx context.Context, c Client, node schema.Node, path Path) (map[string]any, error) {
 	var current map[string]any

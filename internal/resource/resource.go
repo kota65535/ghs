@@ -67,6 +67,19 @@ func (p Path) String() string {
 
 // Object reads and writes the fields of one node directly.
 type Object interface {
+	// Normalize puts a declaration into the form GitHub stores it in, so that
+	// a plan reports only the differences that survive being applied.
+	//
+	// Almost nothing needs it: a value is stored as it is sent. Where GitHub
+	// rewrites what it is given -- repository topics come back lowercased and
+	// sorted however they were sent -- comparing the declaration as written
+	// would report a difference that apply sends and the next read undoes.
+	//
+	// The declaration is not modified: the form GitHub stores is what the plan
+	// and the request are built from, and what the file says stays what the
+	// file says.
+	Normalize(node schema.Node, desired map[string]any) map[string]any
+
 	// Fetch returns the current state as the API reports it.
 	Fetch(ctx context.Context, c Client, node schema.Node, path Path) (map[string]any, error)
 
@@ -111,7 +124,9 @@ type Collection interface {
 // general behaviour, keyed by the path of keys leading to them in the settings
 // file.
 var (
-	objects = map[string]Object{}
+	objects = map[string]Object{
+		"topics": Topics{},
+	}
 
 	collections = map[string]Collection{
 		"rulesets":     Rulesets{},
