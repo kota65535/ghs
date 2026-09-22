@@ -164,7 +164,7 @@ Neither endpoint takes a request body: `PUT` turns the setting on, `DELETE` turn
 
 They differ in how ghs reads them. `security_and_analysis.dependabot_security_updates` appears in the repository response, and the endpoint answers `200` with the flag. Alerts appear nowhere in that response at all: `GET .../vulnerability-alerts` answers `204` when they are on and `404` when they are off, and that status is the whole of the reply.
 
-## Rulesets, variables and environments
+## Labels, rulesets, variables and environments
 
 These are sets of named things rather than one object, so they are written as a list. Each entry is the body that creates one, with `name` identifying it:
 
@@ -177,6 +177,11 @@ actions:
 environments:
   - name: production
     wait_timer: 30
+
+labels:
+  - name: bug
+    color: d73a4a
+    description: Something is not working
 
 rulesets:
   - name: protect-main
@@ -226,6 +231,8 @@ Plan: 1 to create, 1 to change, 1 to delete.
 Leave the key out and ghs does not touch those settings at all — it does not even ask GitHub what is there. To declare that there should be none, write `rulesets: []`, which does ask for every existing one to be deleted and shows up in the plan as such.
 
 The set is what belongs to the repository itself. Rulesets an organization applies to it, and variables defined at the organization level, are not part of it and are never deleted — ghs cannot write them either way. Anything ghs *can* write is in scope, though, including entries some other tool created, so do not manage the same set from two places.
+
+Labels are worth a word on both counts. GitHub gives a new repository nine of its own — `bug`, `documentation`, `enhancement` and the rest — and they belong to the repository, so writing `labels:` puts them under management like anything else: the ones the file does not list are deleted, and the plan says so before it happens. A label's `color` is written as the API reports it, six hexadecimal digits with no leading `#`.
 
 Within an entry the usual rule holds: fields you leave out are not managed.
 

@@ -187,6 +187,18 @@ var generated = Node{
 				},
 			},
 		},
+		"labels": Node{
+			Kind:    KindCollection,
+			Segment: "labels",
+			Method:  "POST",
+			Summary: "Create a label",
+			// from POST /repos/{owner}/{repo}/labels
+			Fields: map[string]Field{
+				"color":       {Type: "string", Description: "The [hexadecimal color code](http://www.color-hex.com/) for the label, without the leading `#`."},
+				"description": {Type: "string", Description: "A short description of the label. Must be 100 characters or fewer."},
+				"name":        {Type: "string", Description: "The name of the label. Emoji can be added to label names, using either native emoji or colon-style markup. For example, typing `:strawberry:` will render the emoji ![:strawberry:](https://github.githubassets.com/images/icons/emoji/unicode/1f353.png \":strawberry:\"). For a full list of available emoji and codes, see \"[Emoji cheat sheet](https://github.com/ikatyang/emoji-cheat-sheet).\""},
+			},
+		},
 		"rulesets": Node{
 			Kind:    KindCollection,
 			Segment: "rulesets",
