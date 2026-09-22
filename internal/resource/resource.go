@@ -133,6 +133,7 @@ var (
 	collections = map[string]Collection{
 		"rulesets":     Rulesets{},
 		"environments": Environments{},
+		"labels":       Labels{},
 	}
 )
 

@@ -234,6 +234,8 @@ The set is what belongs to the repository itself. Rulesets an organization appli
 
 Labels are worth a word on both counts. GitHub gives a new repository nine of its own — `bug`, `documentation`, `enhancement` and the rest — and they belong to the repository, so writing `labels:` puts them under management like anything else: the ones the file does not list are deleted, and the plan says so before it happens. A label's `color` is written as the API reports it, six hexadecimal digits with no leading `#`.
 
+Changing a label's `name` is not a rename. An entry is matched on its name, so the old label is deleted and a new one created — and a deleted label comes off the issues and pull requests that carried it. The plan reports both halves, so you can see it coming. Rename in the GitHub UI first if you want the label to keep what it is attached to, then update the file to match.
+
 Within an entry the usual rule holds: fields you leave out are not managed.
 
 An environment's variables go under the environment that owns them:
