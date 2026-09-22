@@ -175,6 +175,51 @@ rulesets:
 	}
 }
 
+func TestPlanRenamesALabelRatherThanReplacingIt(t *testing.T) {
+	client := &fakeClient{reads: map[string]string{
+		"repos/kota65535/ghs/labels": `[{"id": 1, "name": "bug", "color": "d73a4a", "description": "Something is not working"}]`,
+	}}
+
+	p := planFor(t, client, `
+labels:
+  - name: defect
+    color: d73a4a
+    description: Something is not working
+`)
+
+	// Deleting the label would take it off the issues that carry it, so the
+	// declaration under a new name is read as the rename it was meant to be.
+	if got := p.plan.Summarize(); got.Changed != 1 || got.Created != 0 || got.Deleted != 0 {
+		t.Errorf("summary = %+v, want one change and nothing added or removed", got)
+	}
+
+	var out bytes.Buffer
+	if err := apply(context.Background(), &out, p, diff.FormatText); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	if got, want := client.calls(), "PATCH repos/kota65535/ghs/labels/bug"; len(got) != 1 || got[0] != want {
+		t.Errorf("made %v, want [%s]", got, want)
+	}
+}
+
+func TestPlanReplacesALabelThatChangedTooMuchToBeARename(t *testing.T) {
+	client := &fakeClient{reads: map[string]string{
+		"repos/kota65535/ghs/labels": `[{"id": 1, "name": "bug", "color": "d73a4a"}]`,
+	}}
+
+	p := planFor(t, client, `
+labels:
+  - name: defect
+    color: 0e8a16
+`)
+
+	// A colour the file also changes is not a claim that this is the old
+	// label, so the literal reading stands.
+	if got := p.plan.Summarize(); got.Created != 1 || got.Deleted != 1 {
+		t.Errorf("summary = %+v, want one added and one removed", got)
+	}
+}
+
 func TestApplyWritesEachNodeToItsOwnEndpoint(t *testing.T) {
 	client := &fakeClient{reads: map[string]string{
 		"repos/kota65535/ghs":                              `{"has_issues": false}`,

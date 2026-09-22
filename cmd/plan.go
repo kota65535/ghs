@@ -160,7 +160,14 @@ func planElements(ctx context.Context, client resource.Client, key string, decla
 		current = read
 	}
 
-	for _, match := range diff.MatchElements(key, current, declared.Elements) {
+	matches := diff.MatchElements(key, current, declared.Elements)
+	// Where an element can be renamed, a declaration under a new name is worth
+	// reading as one rather than as a delete and a create.
+	if _, renames := collection.(resource.Renamer); renames {
+		matches = diff.PairRenames(matches)
+	}
+
+	for _, match := range matches {
 		element := diff.ElementDiff{
 			Name:    match.Name,
 			Path:    match.Path,

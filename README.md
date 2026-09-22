@@ -234,7 +234,22 @@ The set is what belongs to the repository itself. Rulesets an organization appli
 
 Labels are worth a word on both counts. GitHub gives a new repository nine of its own — `bug`, `documentation`, `enhancement` and the rest — and they belong to the repository, so writing `labels:` puts them under management like anything else: the ones the file does not list are deleted, and the plan says so before it happens. A label's `color` is written as the API reports it, six hexadecimal digits with no leading `#`.
 
-Changing a label's `name` is not a rename. An entry is matched on its name, so the old label is deleted and a new one created — and a deleted label comes off the issues and pull requests that carried it. The plan reports both halves, so you can see it coming. Rename in the GitHub UI first if you want the label to keep what it is attached to, then update the file to match.
+Renaming a label is worth a note of its own, because deleting one takes it off every issue and pull request that carried it. A settings file says what should be there rather than how to get there, so a label written under a new name reads as two facts — the old one is gone, a new one is wanted — and applied literally that would lose what the label was attached to.
+
+So where a declaration differs from a label GitHub reports **only** by name, ghs reads it as the rename it was meant to be:
+
+```console
+$ ghs plan
+~ labels: [
+    ~ {
+        ~ name: "bug" -> "defect"
+      },
+  ]
+
+Plan: 1 to change.
+```
+
+Change anything else at the same time and there is nothing left to recognise the label by, so the literal reading stands and the plan says so — one removed, one added. To rename and recolour in one go, rename first, apply, then change the rest. The same applies where two labels would each fit: if `bug` and `task` are both red and both are rewritten, no pairing is more right than the other, and ghs will not guess.
 
 Within an entry the usual rule holds: fields you leave out are not managed.
 

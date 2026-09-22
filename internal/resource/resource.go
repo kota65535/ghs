@@ -120,6 +120,26 @@ type Collection interface {
 	ElementPath(path Path, element map[string]any) (Path, error)
 }
 
+// Renamer is a collection whose API renames an element in place, and for which
+// deleting one element and creating another is not the same thing as renaming.
+//
+// Matching an element by name means a declaration under a new name is, read
+// literally, a delete and a create. That reading is right for most collections
+// -- a ruleset is its settings, so one created with the settings of the one
+// just deleted is the same ruleset. It is wrong where the element is referred
+// to from outside the settings ghs manages: a deleted label comes off the
+// issues that carried it, and creating its replacement does not put it back.
+//
+// A collection that implements this has its matches folded by diff.PairRenames
+// before anything is applied, so an unambiguous rename is planned and applied
+// as the update it was meant to be.
+type Renamer interface {
+	Collection
+
+	// Renames distinguishes the interface. It is never called.
+	Renames()
+}
+
 // objects and collections hold the nodes that need something other than the
 // general behaviour, keyed by the path of keys leading to them in the settings
 // file.
