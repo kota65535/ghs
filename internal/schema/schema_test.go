@@ -58,6 +58,7 @@ func TestPathsBecomeKeys(t *testing.T) {
 		{[]string{"actions", "permissions"}, "permissions", "PUT", KindObject},
 		{[]string{"actions", "permissions", "workflow"}, "workflow", "PUT", KindObject},
 		{[]string{"actions", "variables"}, "variables", "POST", KindCollection},
+		{[]string{"labels"}, "labels", "POST", KindCollection},
 		{[]string{"rulesets"}, "rulesets", "POST", KindCollection},
 		{[]string{"environments"}, "environments", "PUT", KindCollection},
 		{[]string{"environments", "variables"}, "variables", "POST", KindCollection},
@@ -139,6 +140,7 @@ func TestCollectionElementsCarryAName(t *testing.T) {
 	// name, so declaring one has to be allowed.
 	for _, keys := range [][]string{
 		{"environments"},
+		{"labels"},
 		{"rulesets"},
 		{"actions", "variables"},
 		{"environments", "variables"},

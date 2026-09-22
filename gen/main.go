@@ -59,6 +59,7 @@ var operations = []operation{
 
 	{key: []string{"topics"}, path: "/repos/{owner}/{repo}/topics", method: "put", kind: "KindObject"},
 
+	{key: []string{"labels"}, path: "/repos/{owner}/{repo}/labels", method: "post", kind: "KindCollection"},
 	{key: []string{"rulesets"}, path: "/repos/{owner}/{repo}/rulesets", method: "post", kind: "KindCollection"},
 	{key: []string{"environments"}, path: "/repos/{owner}/{repo}/environments/{environment_name}", method: "put", kind: "KindCollection"},
 	{key: []string{"environments", "variables"}, path: "/repos/{owner}/{repo}/environments/{environment_name}/variables", method: "post", kind: "KindCollection"},
