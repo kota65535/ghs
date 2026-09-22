@@ -12,6 +12,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"strings"
 
 	"github.com/kota65535/ghs/internal/schema"
 )
@@ -133,12 +134,13 @@ var (
 	collections = map[string]Collection{
 		"rulesets":     Rulesets{},
 		"environments": Environments{},
+		"environments.deployment-branch-policies": DeploymentBranchPolicies{},
 	}
 )
 
 // ObjectFor returns how to read and write the fields of a node.
 func ObjectFor(key string) Object {
-	if special, ok := objects[key]; ok {
+	if special, ok := objects[nodeKey(key)]; ok {
 		return special
 	}
 	return GenericObject{}
@@ -146,8 +148,36 @@ func ObjectFor(key string) Object {
 
 // CollectionFor returns how to read and write the elements of a collection.
 func CollectionFor(key string) Collection {
-	if special, ok := collections[key]; ok {
+	if special, ok := collections[nodeKey(key)]; ok {
 		return special
 	}
 	return GenericCollection{}
+}
+
+// nodeKey drops the element names out of a key, so that a node below a
+// collection element is looked up by where it sits in the settings file rather
+// than by which element it happens to belong to: the deployment branch policies
+// of every environment are the same node, but the key that reaches them --
+// `environments["production"].deployment-branch-policies` -- names one.
+//
+// The names are written with %q by diff.ElementPath, so a quote inside one
+// arrives escaped and does not end it.
+func nodeKey(key string) string {
+	var out strings.Builder
+	for i := 0; i < len(key); i++ {
+		if key[i] != '[' {
+			out.WriteByte(key[i])
+			continue
+		}
+		if i++; i < len(key) && key[i] == '"' {
+			for i++; i < len(key) && key[i] != '"'; i++ {
+				if key[i] == '\\' {
+					i++
+				}
+			}
+			i++
+		}
+		// What is left is the closing bracket, which the loop steps over.
+	}
+	return out.String()
 }

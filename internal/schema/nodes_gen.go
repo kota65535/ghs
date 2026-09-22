@@ -174,6 +174,17 @@ var generated = Node{
 				"wait_timer": {Type: "integer", Description: "The amount of time to delay a job after the job is initially triggered. The time (in minutes) must be an integer between 0 and 43,200 (30 days)."},
 			},
 			Nodes: map[string]Node{
+				"deployment-branch-policies": Node{
+					Kind:    KindCollection,
+					Segment: "deployment-branch-policies",
+					Method:  "POST",
+					Summary: "Create a deployment branch policy",
+					// from POST /repos/{owner}/{repo}/environments/{environment_name}/deployment-branch-policies
+					Fields: map[string]Field{
+						"name": {Type: "string", Description: "The name pattern that branches or tags must match in order to deploy to the environment.\n\nWildcard characters will not match `/`. For example, to match branches that begin with `release/` and contain an additional single slash, use `release/*/*`.\nFor more information about pattern matching syntax, see the [Ruby File.fnmatch documentation](https://ruby-doc.org/core-2.5.1/File.html#method-c-fnmatch)."},
+						"type": {Type: "string", Enum: []string{"branch", "tag"}, Description: "Whether this rule targets a branch or tag"},
+					},
+				},
 				"variables": Node{
 					Kind:    KindCollection,
 					Segment: "variables",

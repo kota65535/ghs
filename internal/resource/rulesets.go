@@ -92,11 +92,17 @@ func (r Rulesets) Delete(ctx context.Context, c Client, node schema.Node, path P
 
 // ElementPath implements Collection, addressing a ruleset by the id GitHub
 // issued for it.
+func (Rulesets) ElementPath(path Path, element map[string]any) (Path, error) {
+	return elementByID(path, element, "ruleset")
+}
+
+// elementByID addresses an element by the id GitHub issued for it, which is
+// what a collection matched on name but written by id needs.
 //
 // The id arrives as a JSON number, so it is a float64 here; rendering it with
 // %v would spell a large one in exponent notation and produce a path the API
 // does not recognize.
-func (Rulesets) ElementPath(path Path, element map[string]any) (Path, error) {
+func elementByID(path Path, element map[string]any, what string) (Path, error) {
 	switch id := element[idField].(type) {
 	case float64:
 		return path.Element(fmt.Sprintf("%d", int64(id))), nil
@@ -107,6 +113,6 @@ func (Rulesets) ElementPath(path Path, element map[string]any) (Path, error) {
 	case string:
 		return path.Element(id), nil
 	default:
-		return Path{}, fmt.Errorf("ruleset %v has no usable id", element[elementName])
+		return Path{}, fmt.Errorf("%s %v has no usable id", what, element[elementName])
 	}
 }

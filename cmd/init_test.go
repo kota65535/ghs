@@ -32,6 +32,9 @@ func TestGenerateWritesTheCurrentSettings(t *testing.T) {
 		"repos/kota65535/ghs/actions/variables":                 `{"total_count": 1, "variables": [{"name": "REGION", "value": "us-east-1", "created_at": "2026-01-01T00:00:00Z"}]}`,
 		"repos/kota65535/ghs/environments":                      `{"total_count": 1, "environments": [{"id": 1, "name": "production", "protection_rules": [{"type": "wait_timer", "wait_timer": 30}]}]}`,
 		"repos/kota65535/ghs/environments/production/variables": `{"total_count": 0, "variables": []}`,
+		"repos/kota65535/ghs/environments/production/deployment-branch-policies": `{"total_count": 1, "branch_policies": [
+			{"id": 361471, "name": "release/*", "type": "branch"}
+		]}`,
 	}}
 
 	settings, err := generate(context.Background(), client, testRepo, []string{"actions", "environments", repositoryKey}, false)
@@ -46,6 +49,7 @@ func TestGenerateWritesTheCurrentSettings(t *testing.T) {
 		"default_workflow_permissions: read",
 		"name: REGION",
 		"wait_timer: 30",
+		"release/*",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("generated file is missing %q:\n%s", want, got)
@@ -58,6 +62,7 @@ func TestGenerateWritesTheCurrentSettings(t *testing.T) {
 		"pushed_at",
 		"selected_actions_url",
 		"created_at",
+		"node_id",
 		"homepage",
 		"name: ghs",
 		"security_and_analysis",
