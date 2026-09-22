@@ -150,6 +150,15 @@ type Node struct {
 	// fields, and a declaration of one reads as a change against nothing.
 	Conditional bool
 
+	// Key is the field an element of a collection is identified by, where the
+	// API calls it something other than a name. It is empty everywhere else,
+	// including on a node that is not a collection at all.
+	//
+	// An autolink is the reason it exists: GitHub identifies one by its
+	// key_prefix, and calling that a name in the file would be inventing a
+	// field the API has never heard of.
+	Key string
+
 	// Fields are the writable fields of this node, taken from the request body
 	// of its operation. For a collection they describe one element.
 	Fields map[string]Field
@@ -161,6 +170,15 @@ type Node struct {
 
 // IsCollection reports whether the node is a set of named elements.
 func (n Node) IsCollection() bool { return n.Kind == KindCollection }
+
+// KeyField is the field an element of this collection is identified by, which
+// is the name unless the node says otherwise.
+func (n Node) KeyField() string {
+	if n.Key != "" {
+		return n.Key
+	}
+	return NameField
+}
 
 // IsNamespace reports whether the node only groups the nodes beneath it.
 func (n Node) IsNamespace() bool { return n.Kind == KindNamespace }

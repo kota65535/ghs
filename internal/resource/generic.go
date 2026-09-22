@@ -57,7 +57,7 @@ func (GenericCollection) FetchAll(ctx context.Context, c Client, node schema.Nod
 	if err != nil {
 		return nil, err
 	}
-	return byName(elements, node.Segment)
+	return byName(elements, node.KeyField(), node.Segment)
 }
 
 // Create implements Collection.
@@ -187,18 +187,46 @@ func eachPage(fetch func(page int) (count int, err error)) error {
 	return fmt.Errorf("stopped after %d pages: the API keeps reporting more", maxPages)
 }
 
-// byName keys elements by their name field, failing on an element that has
-// none: without a name there is nothing to match it against.
-func byName(elements []map[string]any, what string) (map[string]map[string]any, error) {
+// byName keys elements by the field they are identified by, failing on an
+// element that lacks it: without it there is nothing to match the element
+// against.
+func byName(elements []map[string]any, key, what string) (map[string]map[string]any, error) {
 	out := make(map[string]map[string]any, len(elements))
 	for _, element := range elements {
-		name, ok := element[elementName].(string)
+		name, ok := element[key].(string)
 		if !ok || name == "" {
-			return nil, fmt.Errorf("%s: the API reported an element with no name", what)
+			return nil, fmt.Errorf("%s: the API reported an element with no %s", what, key)
 		}
 		out[name] = element
 	}
 	return out, nil
+}
+
+// idField is what GitHub issues for an element of some collections and what
+// addresses it afterwards. It is not declared in the settings file, so it is
+// only ever read from the current state.
+const idField = "id"
+
+// pathByID addresses an element by the id GitHub issued for it, reporting
+// false where the element carries none. A collection matched on a name GitHub
+// does not address by needs it: a ruleset, an autolink.
+//
+// The id arrives as a JSON number, so it is a float64 here; rendering it with
+// %v would spell a large one in exponent notation and produce a path the API
+// does not recognize.
+func pathByID(path Path, element map[string]any) (Path, bool) {
+	switch id := element[idField].(type) {
+	case float64:
+		return path.Element(fmt.Sprintf("%d", int64(id))), true
+	case int64:
+		return path.Element(fmt.Sprintf("%d", id)), true
+	case int:
+		return path.Element(fmt.Sprintf("%d", id)), true
+	case string:
+		return path.Element(id), true
+	default:
+		return Path{}, false
+	}
 }
 
 // nameOf returns the name of an element, which is how most collections address
@@ -270,12 +298,25 @@ func isNotFound(err error) bool {
 // GitHub answers 409 where the allowed actions are not being selected, and 422
 // where a setting is for private repositories only. Both say the same thing:
 // there is nothing here to read.
+//
+// 403 is not among them. A node being out of reach is not the same as its
+// having nothing to report, and reading the two alike would have a token short
+// of a permission report settings as absent. Where a 403 does mean absence --
+// autolinks, which GitHub Free does not have -- it is read that way by the
+// resource that knows it, not here.
 func doesNotApply(err error) bool {
 	var httpErr *api.HTTPError
 	if !errors.As(err, &httpErr) {
 		return false
 	}
 	return httpErr.StatusCode == http.StatusConflict || httpErr.StatusCode == http.StatusUnprocessableEntity
+}
+
+// isForbidden reports the 403 GitHub answers where a feature is not part of
+// the repository's plan.
+func isForbidden(err error) bool {
+	var httpErr *api.HTTPError
+	return errors.As(err, &httpErr) && httpErr.StatusCode == http.StatusForbidden
 }
 
 // escape makes a name safe to put in a path. Environment names allow

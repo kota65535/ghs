@@ -350,6 +350,13 @@ func fetchElements(ctx context.Context, client resource.Client, key string, node
 	if err != nil {
 		return nil, err
 	}
+	// A conditional collection this repository does not have reports nothing
+	// rather than an empty set, and the key is left out as it is for a
+	// conditional object. Writing `autolinks: []` into the file of a repository
+	// that cannot have autolinks would declare a set nobody can hold.
+	if current == nil && node.Conditional {
+		return nil, nil
+	}
 
 	out := &yaml.Node{Kind: yaml.SequenceNode}
 	for _, name := range sortedKeys(current) {

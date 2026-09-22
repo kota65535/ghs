@@ -23,7 +23,7 @@ func (Environments) FetchAll(ctx context.Context, c Client, node schema.Node, pa
 	for _, environment := range listed {
 		declared = append(declared, asRequest(environment))
 	}
-	return byName(declared, node.Segment)
+	return byName(declared, node.KeyField(), node.Segment)
 }
 
 // Create implements Collection.

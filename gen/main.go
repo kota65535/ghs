@@ -42,6 +42,11 @@ type operation struct {
 
 	// conditional marks a path that exists only in some repositories.
 	conditional bool
+
+	// elementKey names the field a collection's elements are identified by,
+	// where that is not the name nearly all of them carry. An autolink is
+	// identified by its key_prefix: nothing about it is called a name.
+	elementKey string
 }
 
 // operations lists every node ghs generates a description for. Adding a
@@ -58,6 +63,8 @@ var operations = []operation{
 	{key: nil, path: "/repos/{owner}/{repo}", method: "patch", kind: "KindObject"},
 
 	{key: []string{"topics"}, path: "/repos/{owner}/{repo}/topics", method: "put", kind: "KindObject"},
+
+	{key: []string{"autolinks"}, path: "/repos/{owner}/{repo}/autolinks", method: "post", kind: "KindCollection", conditional: true, elementKey: "key_prefix"},
 
 	{key: []string{"rulesets"}, path: "/repos/{owner}/{repo}/rulesets", method: "post", kind: "KindCollection"},
 	{key: []string{"environments"}, path: "/repos/{owner}/{repo}/environments/{environment_name}", method: "put", kind: "KindCollection"},
@@ -197,6 +204,7 @@ type node struct {
 	method      string
 	summary     string
 	conditional bool
+	elementKey  string
 	from        string // the operation it was generated from, for a comment
 
 	fields map[string]field
@@ -271,6 +279,7 @@ func buildTree(spec map[string]any) (*node, error) {
 		target.method = strings.ToUpper(op.method)
 		target.summary = operationSummary(spec, op)
 		target.conditional = op.conditional
+		target.elementKey = op.elementKey
 		target.fields = c.properties(props, nil)
 		target.from = fmt.Sprintf("%s %s", strings.ToUpper(op.method), op.path)
 		// The root is where paths are measured from, so it adds nothing to
@@ -334,6 +343,9 @@ func writeNode(b *strings.Builder, n *node, depth int) {
 	}
 	if n.conditional {
 		fmt.Fprintf(b, "%s\tConditional: true,\n", indent)
+	}
+	if n.elementKey != "" {
+		fmt.Fprintf(b, "%s\tKey: %q,\n", indent, n.elementKey)
 	}
 
 	if len(n.fields) > 0 {

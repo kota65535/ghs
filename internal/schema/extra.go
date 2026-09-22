@@ -110,14 +110,15 @@ func patch(node *Node, path string) {
 		fields[name] = field
 	}
 
-	// Every element of a collection is identified by name, so name is a field
-	// of one whether or not the request body has it. Creating an environment
-	// takes the name in the path -- PUT
+	// Every element of a collection is identified by one field, so that field
+	// is a field of one whether or not the request body has it. Creating an
+	// environment takes the name in the path -- PUT
 	// /repos/{owner}/{repo}/environments/{environment_name} -- which leaves it
-	// out of the body the description is generated from.
+	// out of the body the description is generated from. Where the description
+	// does state it, as it does for an autolink's key_prefix, nothing is added.
 	if node.IsCollection() {
-		if _, described := fields[NameField]; !described {
-			fields[NameField] = Field{
+		if _, described := fields[node.KeyField()]; !described {
+			fields[node.KeyField()] = Field{
 				Type:        "string",
 				Description: "The name this entry is identified by. An entry the file does not declare is deleted.",
 			}
@@ -157,6 +158,7 @@ func patch(node *Node, path string) {
 	node.Nodes = children
 }
 
-// NameField identifies an element of a collection. Every element carries it,
-// whether the API takes it in the request body or in the path.
+// NameField identifies an element of a collection, whether the API takes it in
+// the request body or in the path. It is what Node.KeyField falls back to,
+// which is every collection but the one GitHub identifies by something else.
 const NameField = "name"

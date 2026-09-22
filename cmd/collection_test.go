@@ -222,3 +222,98 @@ func TestApplyStopsAtTheFirstFailure(t *testing.T) {
 		t.Errorf("made %v, want nothing after the failure", client.calls())
 	}
 }
+
+func TestAutolinksAreAChangeAgainstNothingWhereThePlanLacksThem(t *testing.T) {
+	// Autolinks belong to the paid plans, and a repository on GitHub Free
+	// answers 403 rather than with an empty list. A file that declares them is
+	// still read: the plan reports each as arriving, which is what a
+	// conditional path that is not there produces everywhere else, and the rest
+	// of the file is not held up by it.
+	client := &fakeClient{forbids: "autolinks"}
+
+	p := planFor(t, client, "autolinks:\n  - key_prefix: JIRA-\n    url_template: https://jira.example.com/browse/<num>\n")
+
+	if summary := p.plan.Summarize(); summary.Created != 1 || summary.Deleted != 0 {
+		t.Errorf("summary = %+v, want the declared autolink reported as arriving", summary)
+	}
+}
+
+func TestInitLeavesOutAutolinksThePlanDoesNotHave(t *testing.T) {
+	// The file says what the repository has. A repository that cannot have
+	// autolinks has none to write, and `autolinks: []` would declare a set
+	// nobody can hold rather than say nothing.
+	client := &fakeClient{forbids: "autolinks", reads: map[string]string{
+		"repos/kota65535/ghs": `{"has_issues": true}`,
+	}}
+
+	settings, err := generate(context.Background(), client, testRepo, []string{repositoryKey, "autolinks"}, false)
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	if strings.Contains(string(settings), "autolinks") {
+		t.Errorf("settings mention autolinks, want the key left out:\n%s", settings)
+	}
+}
+
+func TestApplyAnAutolinkReplacesIt(t *testing.T) {
+	// GitHub has no endpoint that changes an autolink, so changing one means
+	// deleting it and creating it again. The plan still reports it as a change,
+	// which is what it is: the autolink the prefix stands for goes on existing,
+	// and what the file does not declare is carried over rather than reset.
+	client := &fakeClient{reads: map[string]string{
+		"repos/kota65535/ghs/autolinks": `[
+			{"id": 7, "key_prefix": "JIRA-", "url_template": "https://old.example.com/<num>", "is_alphanumeric": false},
+			{"id": 8, "key_prefix": "GONE-", "url_template": "https://gone.example.com/<num>", "is_alphanumeric": true}
+		]`,
+	}}
+
+	p := planFor(t, client, `
+autolinks:
+  - key_prefix: JIRA-
+    url_template: https://jira.example.com/browse/<num>
+  - key_prefix: ADD-
+    url_template: https://add.example.com/<num>
+`)
+
+	var out bytes.Buffer
+	if err := apply(context.Background(), &out, p, diff.FormatText); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+
+	want := []string{
+		"POST repos/kota65535/ghs/autolinks",     // ADD-, which is new
+		"DELETE repos/kota65535/ghs/autolinks/7", // JIRA-, on its way back
+		"POST repos/kota65535/ghs/autolinks",     //
+		"DELETE repos/kota65535/ghs/autolinks/8", // GONE-, which the file dropped
+	}
+	got := client.calls()
+	if len(got) != len(want) {
+		t.Fatalf("made %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("call %d = %q, want %q", i, got[i], want[i])
+		}
+	}
+
+	// The autolink is put back whole: is_alphanumeric is not declared, so what
+	// it was is what it stays.
+	replaced := client.writes[2].body
+	if replaced["is_alphanumeric"] != false || replaced["url_template"] != "https://jira.example.com/browse/<num>" {
+		t.Errorf("body = %+v, want the declaration over what was reported", replaced)
+	}
+
+	output := out.String()
+	for _, want := range []string{
+		"~ autolinks: [",
+		`          key_prefix:   "JIRA-"`,
+		`        ~ url_template: "https://old.example.com/<num>" -> "https://jira.example.com/browse/<num>"`,
+		`        + key_prefix:   "ADD-"`,
+		`        - key_prefix:      "GONE-"`,
+		"Apply complete. 1 created, 1 changed, 1 deleted.",
+	} {
+		if !strings.Contains(output, want) {
+			t.Errorf("output missing %q:\n%s", want, output)
+		}
+	}
+}

@@ -134,13 +134,15 @@ func TestExtraNodesAreStillMissingFromTheDescription(t *testing.T) {
 }
 
 func TestEveryCollectionGainsItsNameField(t *testing.T) {
-	// The name is added to every collection during the merge, so a collection
-	// GitHub adds later gets one without anybody remembering to say so.
+	// The field an element is identified by is added to every collection during
+	// the merge, so a collection GitHub adds later gets one without anybody
+	// remembering to say so. For nearly all of them that field is the name; an
+	// autolink states its own, and the description already has it.
 	var check func(node Node, where string)
 	check = func(node Node, where string) {
 		if node.IsCollection() {
-			if _, ok := node.Field(NameField); !ok {
-				t.Errorf("%s: collection has no %s field", where, NameField)
+			if _, ok := node.Field(node.KeyField()); !ok {
+				t.Errorf("%s: collection has no %s field", where, node.KeyField())
 			}
 		}
 		for _, name := range node.ChildNames() {

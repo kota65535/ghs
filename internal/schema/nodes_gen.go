@@ -153,6 +153,20 @@ var generated = Node{
 				},
 			},
 		},
+		"autolinks": Node{
+			Kind:        KindCollection,
+			Segment:     "autolinks",
+			Method:      "POST",
+			Summary:     "Create an autolink reference for a repository",
+			Conditional: true,
+			Key:         "key_prefix",
+			// from POST /repos/{owner}/{repo}/autolinks
+			Fields: map[string]Field{
+				"is_alphanumeric": {Type: "boolean", Description: "Whether this autolink reference matches alphanumeric characters. If true, the `<num>` parameter of the `url_template` matches alphanumeric characters `A-Z` (case insensitive), `0-9`, and `-`. If false, this autolink reference only matches numeric characters.", Default: true},
+				"key_prefix":      {Type: "string", Description: "This prefix appended by certain characters will generate a link any time it is found in an issue, pull request, or commit."},
+				"url_template":    {Type: "string", Description: "The URL must contain `<num>` for the reference number. `<num>` matches different characters depending on the value of `is_alphanumeric`."},
+			},
+		},
 		"environments": Node{
 			Kind:    KindCollection,
 			Segment: "environments",

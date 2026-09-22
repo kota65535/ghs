@@ -5,7 +5,8 @@
 // method, and Object or Collection does the rest. What is written here by hand
 // is the handful of places where GitHub does not follow its own pattern -- a
 // ruleset addressed by a server-issued id, an environment whose reported shape
-// differs from the one that declares it.
+// differs from the one that declares it, an autolink with no endpoint to
+// change it.
 package resource
 
 import (
@@ -131,6 +132,7 @@ var (
 	}
 
 	collections = map[string]Collection{
+		"autolinks":    Autolinks{},
 		"rulesets":     Rulesets{},
 		"environments": Environments{},
 	}
