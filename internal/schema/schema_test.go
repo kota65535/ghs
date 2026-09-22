@@ -160,6 +160,34 @@ func TestCollectionElementsCarryAName(t *testing.T) {
 	}
 }
 
+func TestAnAutolinkIsIdentifiedByItsPrefix(t *testing.T) {
+	// Nothing about an autolink is called a name. Calling its key_prefix one
+	// would be inventing a field the API has never heard of, so the node says
+	// which of its own fields identifies an element, as every collection does.
+	autolinks := at(t, "autolinks")
+
+	if got := autolinks.Match; got != "key_prefix" {
+		t.Errorf("Match = %q, want key_prefix", got)
+	}
+	if got := autolinks.Address; got != "id" {
+		t.Errorf("Address = %q, want id: GitHub addresses an autolink by the id it issued", got)
+	}
+	if autolinks.Rename != "" {
+		t.Errorf("Rename = %q, want none: there is no endpoint that changes an autolink", autolinks.Rename)
+	}
+	if _, ok := autolinks.Field("key_prefix"); !ok {
+		t.Error("key_prefix is missing, want the field elements are identified by")
+	}
+	if _, ok := autolinks.Field(NameField); ok {
+		t.Error("autolinks has a name field, want only the key_prefix the API takes")
+	}
+	// Autolinks belong to the paid plans, so the path is not there to be read
+	// in every repository.
+	if !autolinks.Conditional {
+		t.Error("autolinks is not marked conditional, want it absent where the plan lacks it")
+	}
+}
+
 func TestReferencedSchemasAreFollowed(t *testing.T) {
 	// The ruleset request body shares schemas through $ref. Without following
 	// them the enum and the nested fields are lost, and settings the API

@@ -31,6 +31,12 @@ type ElementDiff struct {
 	Name string
 	Path string
 
+	// Key is the field the name was read from: the collection's Match, which
+	// is what the element is written under in the file. It is the name for
+	// most collections and key_prefix for an autolink. Empty reads as the
+	// name.
+	Key string
+
 	// Action is whether the element is arriving, going, or staying and
 	// changing.
 	Action Action
@@ -109,6 +115,7 @@ func (p *Plan) Prune() *Plan {
 		kept := ElementDiff{
 			Name:    element.Name,
 			Path:    element.Path,
+			Key:     element.Key,
 			Action:  element.Action,
 			Fields:  element.Fields,
 			Values:  element.Values,

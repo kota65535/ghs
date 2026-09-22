@@ -177,6 +177,9 @@ func TestSpecialCasesAreLookedUpByKey(t *testing.T) {
 	if _, generic := CollectionFor("environments").(GenericCollection); generic {
 		t.Error("environments got the general treatment, want its own: what it reports is not what declares it")
 	}
+	if _, generic := CollectionFor("autolinks").(GenericCollection); generic {
+		t.Error("autolinks got the general treatment, want its own: there is no endpoint that changes one")
+	}
 	if _, generic := CollectionFor("actions.variables").(GenericCollection); !generic {
 		t.Error("actions.variables did not get the general treatment, which is all it needs")
 	}
