@@ -242,6 +242,25 @@ environments:
 
 GitHub reaches these through an endpoint of their own, one variable at a time, but that is a detail of how they are written rather than of what they are: they are a field of the environment, so that is where you declare them. The same rules apply as to any list of entries — declaring `variables` manages the whole set, and leaving the key out means ghs does not touch them.
 
+The branches and tags an environment may be deployed from are written the same way, under `deployment-branch-policies`:
+
+```yaml
+environments:
+  - name: production
+    deployment_branch_policy:
+      protected_branches: false
+      custom_branch_policies: true
+    deployment-branch-policies:
+      - name: release/*
+        type: branch
+      - name: v1.*
+        type: tag
+```
+
+The `deployment_branch_policy` above them is not decoration: GitHub only keeps these patterns for an environment that says its policy is a custom one, and refuses to create them otherwise. Declaring both in the same file is enough, since an environment is written before what hangs off it — but an environment left at `protected_branches: true`, or at `null` for "any branch", has nowhere to put them and apply will say so.
+
+A pattern is what identifies an entry, so changing the `type` of one replaces it rather than editing it in place.
+
 Secrets are not supported, and are not planned. Their values cannot be read back, so a plan could not tell you whether one matches what you declared — and reporting "no changes" without knowing that would be a lie. Use `gh secret set` or a secrets manager.
 
 ## In CI
