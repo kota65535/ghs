@@ -76,6 +76,7 @@ var operations = []operation{
 	{key: []string{"rulesets"}, path: "/repos/{owner}/{repo}/rulesets", method: "post", kind: "KindCollection", match: "name", address: "id", rename: "name"},
 	{key: []string{"environments"}, path: "/repos/{owner}/{repo}/environments/{environment_name}", method: "put", kind: "KindCollection", match: "name", address: "name"},
 	{key: []string{"environments", "variables"}, path: "/repos/{owner}/{repo}/environments/{environment_name}/variables", method: "post", kind: "KindCollection", match: "name", address: "name", rename: "name"},
+	{key: []string{"environments", "deployment-branch-policies"}, path: "/repos/{owner}/{repo}/environments/{environment_name}/deployment-branch-policies", method: "post", kind: "KindCollection", match: "name", address: "id"},
 
 	{key: []string{"actions", "variables"}, path: "/repos/{owner}/{repo}/actions/variables", method: "post", kind: "KindCollection", match: "name", address: "name", rename: "name"},
 	{key: []string{"actions", "permissions"}, path: "/repos/{owner}/{repo}/actions/permissions", method: "put", kind: "KindObject"},
