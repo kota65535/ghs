@@ -164,6 +164,7 @@ func planElements(ctx context.Context, client resource.Client, key string, decla
 		element := diff.ElementDiff{
 			Name:    match.Name,
 			Path:    match.Path,
+			Key:     declared.Node.Key,
 			Action:  match.Action,
 			Current: match.Current,
 		}

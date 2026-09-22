@@ -12,11 +12,6 @@ import (
 // it issues rather than by the name the settings file matches them on.
 type Rulesets struct{}
 
-// idField is what GitHub issues for a ruleset and what addresses it
-// afterwards. It is not declared in the settings file, so it is only ever read
-// from the current state.
-const idField = "id"
-
 // FetchAll implements Collection.
 //
 // Each ruleset is read individually after the listing. The listing describes a
@@ -55,7 +50,7 @@ func (Rulesets) FetchAll(ctx context.Context, c Client, node schema.Node, path P
 		full = append(full, ruleset)
 	}
 
-	return byName(full, node.Segment)
+	return byName(full, node.KeyField(), node.Segment)
 }
 
 // Create implements Collection.
@@ -92,21 +87,10 @@ func (r Rulesets) Delete(ctx context.Context, c Client, node schema.Node, path P
 
 // ElementPath implements Collection, addressing a ruleset by the id GitHub
 // issued for it.
-//
-// The id arrives as a JSON number, so it is a float64 here; rendering it with
-// %v would spell a large one in exponent notation and produce a path the API
-// does not recognize.
 func (Rulesets) ElementPath(path Path, element map[string]any) (Path, error) {
-	switch id := element[idField].(type) {
-	case float64:
-		return path.Element(fmt.Sprintf("%d", int64(id))), nil
-	case int64:
-		return path.Element(fmt.Sprintf("%d", id)), nil
-	case int:
-		return path.Element(fmt.Sprintf("%d", id)), nil
-	case string:
-		return path.Element(id), nil
-	default:
+	target, ok := pathByID(path, element)
+	if !ok {
 		return Path{}, fmt.Errorf("ruleset %v has no usable id", element[elementName])
 	}
+	return target, nil
 }

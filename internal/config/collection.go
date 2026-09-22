@@ -7,10 +7,6 @@ import (
 	"github.com/kota65535/ghs/internal/schema"
 )
 
-// nameField identifies a collection element. Every element carries it, whether
-// the create request sends it in the body or in the path.
-const nameField = schema.NameField
-
 // parseCollectionNode validates a declared collection: the elements themselves
 // and whatever is declared under each of them.
 func parseCollectionNode(path string, node schema.Node, declared any) (*Declaration, []string) {
@@ -26,6 +22,11 @@ func parseCollectionNode(path string, node schema.Node, declared any) (*Declarat
 		return nil, []string{fmt.Sprintf("%s: expected a sequence of elements", path)}
 	}
 
+	// The field an element is identified by is usually its name, but an
+	// autolink is identified by its key_prefix, so the node is asked rather
+	// than assumed.
+	keyField := node.KeyField()
+
 	elements := make(map[string]map[string]any, len(sequence))
 	elementChildren := map[string]map[string]*Declaration{}
 	var problems []string
@@ -40,9 +41,9 @@ func parseCollectionNode(path string, node schema.Node, declared any) (*Declarat
 			continue
 		}
 
-		name, ok := fields[nameField].(string)
+		name, ok := fields[keyField].(string)
 		if !ok || name == "" {
-			problems = append(problems, fmt.Sprintf("%s: %s is required and must be a non-empty string", elementPath, nameField))
+			problems = append(problems, fmt.Sprintf("%s: %s is required and must be a non-empty string", elementPath, keyField))
 			continue
 		}
 

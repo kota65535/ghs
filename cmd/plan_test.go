@@ -12,6 +12,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/cli/go-gh/v2/pkg/api"
+
 	"github.com/kota65535/ghs/internal/config"
 	"github.com/kota65535/ghs/internal/diff"
 	"github.com/kota65535/ghs/internal/resource"
@@ -26,6 +28,11 @@ type fakeClient struct {
 	reads  map[string]string
 	writes []write
 	failOn string
+
+	// forbids answers a read with the 403 GitHub gives where a feature is not
+	// part of the repository's plan, which is what a repository on GitHub Free
+	// says about its autolinks.
+	forbids string
 }
 
 type write struct {
@@ -39,6 +46,9 @@ func (f *fakeClient) DoWithContext(_ context.Context, method, path string, body 
 	bare := strings.SplitN(path, "?", 2)[0]
 
 	if method == http.MethodGet {
+		if f.forbids != "" && strings.Contains(bare, f.forbids) {
+			return &api.HTTPError{StatusCode: http.StatusForbidden, Message: "upgrade to use this feature"}
+		}
 		reply, ok := f.reads[bare]
 		if !ok {
 			reply = "{}"

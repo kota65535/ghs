@@ -166,7 +166,7 @@ They differ in how ghs reads them. `security_and_analysis.dependabot_security_up
 
 ## Rulesets, variables and environments
 
-These are sets of named things rather than one object, so they are written as a list. Each entry is the body that creates one, with `name` identifying it:
+These are sets of named things rather than one object, so they are written as a list. Each entry is the body that creates one, with `name` identifying it — or, where the API calls it something else, the field it does call it by:
 
 ```yaml
 actions:
@@ -241,6 +241,25 @@ environments:
 ```
 
 GitHub reaches these through an endpoint of their own, one variable at a time, but that is a detail of how they are written rather than of what they are: they are a field of the environment, so that is where you declare them. The same rules apply as to any list of entries — declaring `variables` manages the whole set, and leaving the key out means ghs does not touch them.
+
+## Autolinks
+
+An autolink turns a reference in an issue, a pull request or a commit message into a link, so that writing `JIRA-1234` reaches the ticket:
+
+```yaml
+autolinks:                     # /repos/{owner}/{repo}/autolinks
+  - key_prefix: JIRA-
+    url_template: https://jira.example.com/browse/<num>
+    is_alphanumeric: true
+```
+
+`key_prefix` is what identifies an entry here, the way `name` does elsewhere: it is what the API calls it, and nothing about an autolink is called a name. The rest is as for any set — the key declares the whole of it, and an autolink GitHub has and the file does not is deleted.
+
+Two things are worth knowing about them.
+
+**Autolinks are not part of GitHub Free.** On a repository that does not have them, GitHub answers the read with `403`, and ghs treats that as it treats any conditional path: there is nothing there, so a declared autolink shows up in the plan as a change against nothing. `ghs apply` will then be refused by the API. `ghs init` leaves the key out of the file altogether.
+
+**There is no endpoint that changes an autolink.** The API has a create and a delete and nothing in between, so ghs applies a change as a delete followed by a create. The plan still reports it as a change, which is what it is: the prefix goes on standing for an autolink throughout, only its id changes. Fields the file leaves out are carried over from what GitHub reports rather than reset, so the declaration does what the plan said it would and no more.
 
 Secrets are not supported, and are not planned. Their values cannot be read back, so a plan could not tell you whether one matches what you declared — and reporting "no changes" without knowing that would be a lie. Use `gh secret set` or a secrets manager.
 
