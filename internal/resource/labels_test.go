@@ -16,12 +16,12 @@ var labelsNode = schema.Node{
 
 func labelsPath() Path { return At(testRepo).Child("labels") }
 
-// TestLabelsNeedNothingOfTheirOwn checks the assumption the labels node rests
-// on: the endpoints follow GitHub's own pattern, so the general implementation
-// is the whole of what reading and writing them takes.
-func TestLabelsNeedNothingOfTheirOwn(t *testing.T) {
-	if _, generic := CollectionFor("labels").(GenericCollection); !generic {
-		t.Error("labels did not get the general treatment, which is all they need")
+// TestLabelsAreRegistered checks that labels get their own implementation
+// rather than the general one, which they need because the create body and the
+// update body are not the same shape.
+func TestLabelsAreRegistered(t *testing.T) {
+	if _, ours := CollectionFor("labels").(Labels); !ours {
+		t.Error("labels got the general treatment, which sends a name PATCH has no field for")
 	}
 }
 
@@ -37,7 +37,7 @@ func TestLabelsAreReadAsABareList(t *testing.T) {
 	srv := rec.server()
 	defer srv.Close()
 
-	current, err := GenericCollection{}.FetchAll(context.Background(), newTestClient(t, srv), labelsNode, labelsPath())
+	current, err := Labels{}.FetchAll(context.Background(), newTestClient(t, srv), labelsNode, labelsPath())
 	if err != nil {
 		t.Fatalf("FetchAll: %v", err)
 	}
@@ -58,7 +58,7 @@ func TestLabelsAreAddressedByName(t *testing.T) {
 		srv := rec.server()
 		defer srv.Close()
 
-		if err := (GenericCollection{}).Create(context.Background(), newTestClient(t, srv), labelsNode, labelsPath(), desired); err != nil {
+		if err := (Labels{}).Create(context.Background(), newTestClient(t, srv), labelsNode, labelsPath(), desired); err != nil {
 			t.Fatalf("Create: %v", err)
 		}
 
@@ -71,14 +71,16 @@ func TestLabelsAreAddressedByName(t *testing.T) {
 		}
 	})
 
-	t.Run("update patches the label", func(t *testing.T) {
-		// A label name is free text, so it reaches the path escaped.
+	t.Run("update patches the label without its name", func(t *testing.T) {
+		// A label name is free text, so it reaches the path escaped. It does not
+		// reach the body at all: PATCH takes new_name, color and description, so
+		// a name there would be a field the request does not have.
 		rec := newRecorder(t, nil)
 		srv := rec.server()
 		defer srv.Close()
 
 		current := map[string]any{"name": "good first issue", "color": "ffffff"}
-		if err := (GenericCollection{}).Update(context.Background(), newTestClient(t, srv), labelsNode, labelsPath(), current, desired); err != nil {
+		if err := (Labels{}).Update(context.Background(), newTestClient(t, srv), labelsNode, labelsPath(), current, desired); err != nil {
 			t.Fatalf("Update: %v", err)
 		}
 
@@ -86,8 +88,11 @@ func TestLabelsAreAddressedByName(t *testing.T) {
 		if got.method != http.MethodPatch || got.path != "/repos/kota65535/ghs/labels/good%20first%20issue" {
 			t.Errorf("request = %s %s, want PATCH on the label", got.method, got.path)
 		}
-		if got.body["color"] != "7057ff" {
+		if got.body["color"] != "7057ff" || got.body["description"] != "Good for newcomers" {
 			t.Errorf("body = %+v, want the declared label", got.body)
+		}
+		if _, sent := got.body["name"]; sent {
+			t.Errorf("body = %+v, want no name: the path carries it and PATCH renames with new_name", got.body)
 		}
 	})
 
@@ -97,7 +102,7 @@ func TestLabelsAreAddressedByName(t *testing.T) {
 		defer srv.Close()
 
 		current := map[string]any{"name": "wontfix", "color": "ffffff"}
-		if err := (GenericCollection{}).Delete(context.Background(), newTestClient(t, srv), labelsNode, labelsPath(), current); err != nil {
+		if err := (Labels{}).Delete(context.Background(), newTestClient(t, srv), labelsNode, labelsPath(), current); err != nil {
 			t.Fatalf("Delete: %v", err)
 		}
 
