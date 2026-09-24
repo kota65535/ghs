@@ -243,12 +243,35 @@ func writeElements(w io.Writer, elements []ElementDiff, indent string, options r
 func writeElementChanges(w io.Writer, element ElementDiff, indent string, options renderOptions) error {
 	width := fieldWidth(element.Fields, []string{NameField})
 
+	// An element being renamed is identified by neither name on its own, so
+	// the name is written as the change it is, and written once.
+	if ordered, renamed := nameFirst(element.Fields); renamed {
+		return writeFieldChanges(w, ordered, indent, width, options)
+	}
+
 	_, err := fmt.Fprintf(w, "%s%s %-*s %s\n",
 		indent, noSign, width, NameField+":", formatValue(element.Name, false))
 	if err != nil {
 		return err
 	}
 	return writeFieldChanges(w, element.Fields, indent, width, options)
+}
+
+// nameFirst moves a changed name to the front of the fields, reporting whether
+// there was one to move. An element keeps the name it is matched on, so a name
+// among the changes is a rename and nothing else.
+func nameFirst(fields []Change) ([]Change, bool) {
+	for i, change := range fields {
+		if change.Label != NameField {
+			continue
+		}
+		ordered := make([]Change, 0, len(fields))
+		ordered = append(ordered, change)
+		ordered = append(ordered, fields[:i]...)
+		ordered = append(ordered, fields[i+1:]...)
+		return ordered, true
+	}
+	return fields, false
 }
 
 // writeFieldChanges writes one line per changed field, naming the field, the

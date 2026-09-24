@@ -94,6 +94,34 @@ func TestLabelsAreAddressedByName(t *testing.T) {
 		if _, sent := got.body["name"]; sent {
 			t.Errorf("body = %+v, want no name: the path carries it and PATCH renames with new_name", got.body)
 		}
+		if _, renamed := got.body["new_name"]; renamed {
+			t.Errorf("body = %+v, want no new_name: the label keeps the name it has", got.body)
+		}
+	})
+
+	t.Run("a renamed label is patched where GitHub has it", func(t *testing.T) {
+		// What diff.PairRenames folds into an update arrives here as a
+		// declaration whose name is not the reported one.
+		rec := newRecorder(t, nil)
+		srv := rec.server()
+		defer srv.Close()
+
+		current := map[string]any{"id": float64(1), "name": "bug", "color": "7057ff"}
+		renamed := map[string]any{"name": "defect", "color": "7057ff"}
+		if err := (Labels{}).Update(context.Background(), newTestClient(t, srv), labelsNode, labelsPath(), current, renamed); err != nil {
+			t.Fatalf("Update: %v", err)
+		}
+
+		got := rec.only()
+		if got.method != http.MethodPatch || got.path != "/repos/kota65535/ghs/labels/bug" {
+			t.Errorf("request = %s %s, want PATCH on the label as GitHub knows it", got.method, got.path)
+		}
+		if got.body["new_name"] != "defect" {
+			t.Errorf("body = %+v, want the new name as new_name", got.body)
+		}
+		if _, sent := got.body["name"]; sent {
+			t.Errorf("body = %+v, want no name: PATCH renames with new_name", got.body)
+		}
 	})
 
 	t.Run("delete removes the label", func(t *testing.T) {
