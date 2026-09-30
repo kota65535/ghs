@@ -359,7 +359,7 @@ func fetchElements(ctx context.Context, client resource.Client, key string, node
 		}
 
 		if len(node.Nodes) > 0 {
-			elementPath, err := collection.ElementPath(path, current[name])
+			elementPath, err := collection.ElementPath(node, path, current[name])
 			if err != nil {
 				return nil, err
 			}

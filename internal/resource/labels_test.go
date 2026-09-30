@@ -12,6 +12,8 @@ var labelsNode = schema.Node{
 	Kind:    schema.KindCollection,
 	Segment: "labels",
 	Method:  http.MethodPost,
+	Match:   "name",
+	Address: "name",
 }
 
 func labelsPath() Path { return At(testRepo).Child("labels") }

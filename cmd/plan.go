@@ -9,6 +9,7 @@ import (
 	"github.com/kota65535/ghs/internal/config"
 	"github.com/kota65535/ghs/internal/diff"
 	"github.com/kota65535/ghs/internal/resource"
+	"github.com/kota65535/ghs/internal/schema"
 )
 
 func newPlanCommand(global *globalOptions) *cobra.Command {
@@ -131,7 +132,7 @@ func planNode(ctx context.Context, client resource.Client, key string, declared 
 		// The declaration is compared in the form GitHub stores it, which is
 		// also the form apply sends, so that a plan reports only what applying
 		// it actually changes.
-		plan.Fields = diff.Compute(current, object.Normalize(node, declared.Fields))
+		plan.Fields = diff.Compute(current, object.Normalize(node, declared.Fields), node.Matches())
 	}
 
 	for _, name := range declared.ChildNames() {
@@ -174,7 +175,7 @@ func planElements(ctx context.Context, client resource.Client, key string, decla
 		case diff.ActionDelete:
 			element.Values = match.Current
 		default:
-			element.Fields = diff.Compute(match.Current, match.Desired)
+			element.Fields = diff.Compute(match.Current, match.Desired, declared.Node.Matches())
 		}
 
 		// What is declared under an element is planned against that element's
@@ -184,7 +185,7 @@ func planElements(ctx context.Context, client resource.Client, key string, decla
 		// issued yet be created at all.
 		childNames := declared.ElementChildNames(match.Name)
 		if match.Action != diff.ActionDelete && len(childNames) > 0 {
-			elementPath, err := elementPath(collection, path, match)
+			elementPath, err := elementPath(collection, declared.Node, path, match)
 			if err != nil {
 				return err
 			}
@@ -209,11 +210,11 @@ func planElements(ctx context.Context, client resource.Client, key string, decla
 
 // elementPath is where one element sits in the API. An element being created is
 // addressed by what was declared for it, since GitHub has nothing to report.
-func elementPath(collection resource.Collection, path resource.Path, match diff.ElementMatch) (resource.Path, error) {
+func elementPath(collection resource.Collection, node schema.Node, path resource.Path, match diff.ElementMatch) (resource.Path, error) {
 	if match.Current != nil {
-		return collection.ElementPath(path, match.Current)
+		return collection.ElementPath(node, path, match.Current)
 	}
-	return collection.ElementPath(path, match.Desired)
+	return collection.ElementPath(node, path, match.Desired)
 }
 
 func join(path, name string) string {

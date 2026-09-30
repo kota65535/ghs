@@ -100,60 +100,60 @@ func NormalizeMap(v map[string]any) (map[string]any, error) {
 // Only keys present in desired are examined; everything else about the node is
 // left alone. Both arguments are expected to be normalized.
 //
+// matches says which arrays are sets of elements identified by a key rather
+// than sequences compared position by position. It may be nil.
+//
 // The labels are relative to the node being compared. Where that node sits in
 // the settings file is recorded by the plan the changes go into.
-func Compute(current, desired map[string]any) []Change {
+func Compute(current, desired map[string]any, matches Matches) []Change {
 	var changes []Change
-	walk("", current, desired, &changes)
+	walk("", "", current, desired, matches, &changes)
 	sort.Slice(changes, func(i, j int) bool { return changes[i].Label < changes[j].Label })
 	return changes
 }
 
-func walk(prefix string, current, desired map[string]any, changes *[]Change) {
+// walk compares the declared keys of an object.
+//
+// prefix is the label of the object, and shape where it sits with the element
+// indices and keys left out, which is what a match is looked up by.
+func walk(prefix, shape string, current, desired map[string]any, matches Matches, changes *[]Change) {
 	for key, desiredValue := range desired {
-		path := key
-		if prefix != "" {
-			path = prefix + "." + key
-		}
-
 		currentValue, present := current[key]
-		compare(path, currentValue, desiredValue, present, changes)
+		compare(join(prefix, key), join(shape, key), currentValue, desiredValue, present, matches, changes)
 	}
 }
 
 // compare records how one declared value differs from the current one, going
 // into objects and arrays so that the report names the leaf that actually
 // differs.
-func compare(path string, currentValue, desiredValue any, present bool, changes *[]Change) {
+func compare(path, shape string, currentValue, desiredValue any, present bool, matches Matches, changes *[]Change) {
 	// A nested object declared where GitHub reports something else is handled
 	// by the plain comparison at the end.
 	if desiredChild, ok := desiredValue.(map[string]any); ok {
 		if !present {
 			// Report the leaves as missing rather than the parent, so the
 			// output stays at the same granularity everywhere.
-			walk(path, nil, desiredChild, changes)
+			walk(path, shape, nil, desiredChild, matches, changes)
 			return
 		}
 		if currentChild, ok := currentValue.(map[string]any); ok {
-			walk(path, currentChild, desiredChild, changes)
+			walk(path, shape, currentChild, desiredChild, matches, changes)
 			return
 		}
 	}
 
-	// Arrays are compared including their order, pairing elements by index.
-	// Pairing them is what carries partial management into an array: a
-	// ruleset rule declares one parameter and GitHub returns it alongside the
-	// defaults it filled in, which a comparison of the arrays as wholes would
-	// report as a change that apply can never resolve.
-	//
-	// A difference in length does not change that for the positions the two
-	// arrays share. Reporting the whole array instead would drag every
-	// undeclared default GitHub filled in into the report, as though removing
-	// one rule also removed settings that are not managed at all. Positions
-	// past the end of one side are reported on their own.
-	//
-	// An array absent from the response is still reported whole: there is
-	// nothing to pair its elements with.
+	// An array whose elements are identified by a key is a set: elements are
+	// paired by key, whatever order either side lists them in. GitHub does not
+	// report the rules of a ruleset in the order they were sent, and pairing
+	// those by position reports a difference that applying never removes.
+	if desiredArray, ok := desiredValue.([]any); ok && present {
+		if currentArray, ok := currentValue.([]any); ok {
+			if match, keyed := matches[shape]; keyed && compareKeyed(path, shape, currentArray, desiredArray, match, matches, changes) {
+				return
+			}
+		}
+	}
+
 	if desiredArray, ok := desiredValue.([]any); ok && present {
 		if currentArray, ok := currentValue.([]any); ok {
 			shared := len(currentArray)
@@ -162,7 +162,7 @@ func compare(path string, currentValue, desiredValue any, present bool, changes 
 			}
 
 			for i := 0; i < shared; i++ {
-				compare(fmt.Sprintf("%s[%d]", path, i), currentArray[i], desiredArray[i], true, changes)
+				compare(fmt.Sprintf("%s[%d]", path, i), shape, currentArray[i], desiredArray[i], true, matches, changes)
 			}
 			for i := shared; i < len(desiredArray); i++ {
 				*changes = append(*changes, Change{

@@ -48,7 +48,8 @@ func (GenericObject) Apply(ctx context.Context, c Client, node schema.Node, path
 }
 
 // GenericCollection reads a collection with GET on the collection itself and
-// addresses its elements by name, which is how the variables endpoints work.
+// addresses its elements by the field the schema states, which is how the
+// variables endpoints work.
 type GenericCollection struct{}
 
 // FetchAll implements Collection.
@@ -57,20 +58,20 @@ func (GenericCollection) FetchAll(ctx context.Context, c Client, node schema.Nod
 	if err != nil {
 		return nil, err
 	}
-	return byName(elements, node.Segment)
+	return byKey(elements, node)
 }
 
 // Create implements Collection.
 func (GenericCollection) Create(ctx context.Context, c Client, node schema.Node, path Path, desired map[string]any) error {
 	if err := send(ctx, c, http.MethodPost, path.String(), desired); err != nil {
-		return fmt.Errorf("create %s in %s: %w", desired[elementName], path, err)
+		return fmt.Errorf("create %v in %s: %w", desired[node.Match], path, err)
 	}
 	return nil
 }
 
 // Update implements Collection.
 func (g GenericCollection) Update(ctx context.Context, c Client, node schema.Node, path Path, current, desired map[string]any) error {
-	target, err := g.ElementPath(path, desired)
+	target, err := g.ElementPath(node, path, current)
 	if err != nil {
 		return err
 	}
@@ -82,7 +83,7 @@ func (g GenericCollection) Update(ctx context.Context, c Client, node schema.Nod
 
 // Delete implements Collection.
 func (g GenericCollection) Delete(ctx context.Context, c Client, node schema.Node, path Path, current map[string]any) error {
-	target, err := g.ElementPath(path, current)
+	target, err := g.ElementPath(node, path, current)
 	if err != nil {
 		return err
 	}
@@ -92,17 +93,31 @@ func (g GenericCollection) Delete(ctx context.Context, c Client, node schema.Nod
 	return nil
 }
 
-// ElementPath implements Collection.
-func (GenericCollection) ElementPath(path Path, element map[string]any) (Path, error) {
-	name, err := nameOf(element)
-	if err != nil {
-		return Path{}, err
+// ElementPath implements Collection, addressing an element by the field the
+// schema states.
+//
+// A number arrives from JSON as a float64; rendering it with %v would spell a
+// large one in exponent notation and produce a path the API does not
+// recognize.
+func (GenericCollection) ElementPath(node schema.Node, path Path, element map[string]any) (Path, error) {
+	switch address := element[node.Address].(type) {
+	case string:
+		if address != "" {
+			return path.Element(address), nil
+		}
+	case float64:
+		return path.Element(fmt.Sprintf("%d", int64(address))), nil
+	case int64:
+		return path.Element(fmt.Sprintf("%d", address)), nil
+	case int:
+		return path.Element(fmt.Sprintf("%d", address)), nil
 	}
-	return path.Element(name), nil
+	return Path{}, fmt.Errorf("%s %v has no usable %s", node.Segment, element[node.Match], node.Address)
 }
 
-// elementName is the key an element is matched by. Every element carries it,
-// whether the API takes it in the request body or in the path.
+// elementName is the name an element carries where the API takes it in the
+// path rather than the body, which is what the requests that leave it out of
+// the body strip.
 const elementName = schema.NameField
 
 // listElements reads every page of a list endpoint.
@@ -187,28 +202,18 @@ func eachPage(fetch func(page int) (count int, err error)) error {
 	return fmt.Errorf("stopped after %d pages: the API keeps reporting more", maxPages)
 }
 
-// byName keys elements by their name field, failing on an element that has
-// none: without a name there is nothing to match it against.
-func byName(elements []map[string]any, what string) (map[string]map[string]any, error) {
+// byKey keys elements by the field the schema says identifies them, failing on
+// an element that has none: without it there is nothing to match it against.
+func byKey(elements []map[string]any, node schema.Node) (map[string]map[string]any, error) {
 	out := make(map[string]map[string]any, len(elements))
 	for _, element := range elements {
-		name, ok := element[elementName].(string)
-		if !ok || name == "" {
-			return nil, fmt.Errorf("%s: the API reported an element with no name", what)
+		key, ok := element[node.Match].(string)
+		if !ok || key == "" {
+			return nil, fmt.Errorf("%s: the API reported an element with no %s", node.Segment, node.Match)
 		}
-		out[name] = element
+		out[key] = element
 	}
 	return out, nil
-}
-
-// nameOf returns the name of an element, which is how most collections address
-// one.
-func nameOf(element map[string]any) (string, error) {
-	name, ok := element[elementName].(string)
-	if !ok || name == "" {
-		return "", fmt.Errorf("element has no name: %v", element)
-	}
-	return name, nil
 }
 
 // send performs a request with a JSON body, discarding the response: what the

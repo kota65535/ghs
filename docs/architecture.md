@@ -121,9 +121,10 @@ graph TD
     OG0 -->|automated-security-fixes| SF["AutomatedSecurityFixes<br/>ボディなし<br/>enabled が PUT / DELETE を選ぶ"]
     OG0 -->|vulnerability-alerts| VA["VulnerabilityAlerts<br/>ボディなし<br/>GET の 204 / 404 が現在値"]
     CO --> CG{"key に特殊実装は？"}
-    CG -->|なし| GC["GenericCollection<br/>name でアドレス"]
-    CG -->|rulesets| RS["Rulesets<br/>サーバ発行 id でアドレス<br/>要素ごとに個別 GET"]
+    CG -->|なし| GC["GenericCollection<br/>schema の Address でアドレス"]
+    CG -->|rulesets| RS["Rulesets<br/>要素ごとに個別 GET"]
     CG -->|environments| EN["Environments<br/>報告形→宣言形へ変形<br/>PUT が作成と更新を兼ねる"]
+    CG -->|labels| LB["Labels<br/>PATCH のボディから name を除く"]
 
     style OG fill:#e6f4ea
     style GC fill:#e6f4ea
@@ -132,6 +133,7 @@ graph TD
     style VA fill:#fef7e0
     style RS fill:#fef7e0
     style EN fill:#fef7e0
+    style LB fill:#fef7e0
 ```
 
 緑が汎用（パスとメソッドだけで動く）、黄が手書き（GitHub が自分のパターンから外れる箇所）。新しい設定を足すとき、多くの場合 `gen/main.go` の `operations` に 1 行足すだけで済む。
@@ -158,9 +160,10 @@ graph TD
 | やりたいこと | 見る場所 |
 | --- | --- |
 | 管理できる設定を増やす | `gen/main.go` の `operations` |
+| 要素を突き合わせるキー（コレクション、オブジェクトの配列） | `gen/main.go` の `operations` の `match` / `address`、`arrays` |
 | 設定ファイルの検証規則 | `internal/config/config.go`, `collection.go` |
-| 比較のセマンティクス（配列、null、欠落） | `internal/diff/diff.go` |
+| 比較のセマンティクス（配列、null、欠落） | `internal/diff/diff.go`, `match.go` |
 | plan の見た目 | `internal/diff/render.go` |
-| API 呼び出しの特殊対応 | `internal/resource/rulesets.go`, `environments.go`, `topics.go`, `security_fixes.go`, `vulnerability_alerts.go` |
+| API 呼び出しの特殊対応 | `internal/resource/rulesets.go`, `environments.go`, `labels.go`, `topics.go`, `security_fixes.go`, `vulnerability_alerts.go` |
 | spec の欠落を埋める | `internal/schema/extra.go` |
 | リクエストボディを持たない設定を足す | `internal/schema/extra.go` の `extraNodes` と `internal/resource` の Object |

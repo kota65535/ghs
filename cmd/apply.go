@@ -131,7 +131,7 @@ func applyElements(ctx context.Context, client resource.Client, key string, decl
 		if len(element.Children) == 0 {
 			continue
 		}
-		elementPath, err := collection.ElementPath(path, declared.Elements[element.Name])
+		elementPath, err := collection.ElementPath(node, path, declared.Elements[element.Name])
 		if err != nil {
 			return err
 		}

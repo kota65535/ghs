@@ -72,6 +72,18 @@ type Field struct {
 	// write the parameters of a rule with their own documentation, which the
 	// description has and the file otherwise leaves you to look up.
 	Variants map[string]Field
+
+	// Match lists the fields that identify an element of an array field, so
+	// that the elements are compared as a set rather than position by
+	// position. A field may be a dotted path into the element. It is nil for a
+	// field that is not an array of objects.
+	//
+	// GitHub does not report every array in the order it was sent -- the rules
+	// of a ruleset come back in an order of its own -- and pairing elements by
+	// position reports that as a difference that applying never removes. The
+	// description has no way of saying what identifies an element, so this is
+	// stated by hand for every array of objects in gen/main.go.
+	Match []string
 }
 
 // Variant returns what the description says an element of this array field is,
@@ -150,6 +162,17 @@ type Node struct {
 	// fields, and a declaration of one reads as a change against nothing.
 	Conditional bool
 
+	// Match is the field that identifies an element of a collection: a
+	// declared element and a reported one are the same element when they hold
+	// the same value in it. It is empty for a node that is not a collection.
+	Match string
+
+	// Address is the field whose value addresses an element of a collection in
+	// the API, taken from the element GitHub reports. It is often Match, but
+	// need not be: a ruleset is matched by its name and addressed by the id
+	// GitHub issued for it, which the settings file does not hold.
+	Address string
+
 	// Fields are the writable fields of this node, taken from the request body
 	// of its operation. For a collection they describe one element.
 	Fields map[string]Field
@@ -188,6 +211,33 @@ func (n Node) ChildNames() []string {
 	}
 	sort.Strings(names)
 	return names
+}
+
+// Matches returns what identifies an element of each array of objects among
+// the node's fields, keyed by where the array sits: its field names joined by
+// dots, from the node down. An array reached through the elements of another
+// is named without them, so the required status checks of a ruleset are at
+// rules.parameters.required_status_checks whichever rule holds them.
+func (n Node) Matches() map[string][]string {
+	out := map[string][]string{}
+	collectMatches("", n.Fields, out)
+	return out
+}
+
+func collectMatches(prefix string, fields map[string]Field, out map[string][]string) {
+	for name, field := range fields {
+		path := name
+		if prefix != "" {
+			path = prefix + "." + name
+		}
+		if len(field.Match) > 0 {
+			out[path] = field.Match
+		}
+		collectMatches(path, field.Fields, out)
+		for _, variant := range field.Variants {
+			collectMatches(path, variant.Fields, out)
+		}
+	}
 }
 
 // Root is the repository, which is what a settings file describes.

@@ -83,7 +83,8 @@ var extraNodes = map[string]map[string]Node{
 }
 
 // root is what the rest of ghs sees: the generated description with the
-// patched fields merged in, and with the name every collection element carries.
+// patched fields merged in, and with the field that identifies every
+// collection element.
 var root = build()
 
 func build() Node {
@@ -93,7 +94,7 @@ func build() Node {
 }
 
 // patch merges the hand-maintained fields into a node and everything below it,
-// and gives every collection the name its elements are identified by.
+// and gives every collection the field its elements are identified by.
 //
 // Where the description and the patch disagree, the description wins, so an
 // entry that has been described in the meantime changes nothing.
@@ -110,16 +111,15 @@ func patch(node *Node, path string) {
 		fields[name] = field
 	}
 
-	// Every element of a collection is identified by name, so name is a field
-	// of one whether or not the request body has it. Creating an environment
-	// takes the name in the path -- PUT
-	// /repos/{owner}/{repo}/environments/{environment_name} -- which leaves it
-	// out of the body the description is generated from.
-	if node.IsCollection() {
-		if _, described := fields[NameField]; !described {
-			fields[NameField] = Field{
+	// The field that identifies an element is a field of one whether or not
+	// the request body has it. Creating an environment takes the name in the
+	// path -- PUT /repos/{owner}/{repo}/environments/{environment_name} --
+	// which leaves it out of the body the description is generated from.
+	if node.IsCollection() && node.Match != "" {
+		if _, described := fields[node.Match]; !described {
+			fields[node.Match] = Field{
 				Type:        "string",
-				Description: "The name this entry is identified by. An entry the file does not declare is deleted.",
+				Description: "What this entry is identified by. An entry the file does not declare is deleted.",
 			}
 		}
 	}

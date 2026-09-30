@@ -313,3 +313,40 @@ func TestParseAcceptsAnEmptySequenceUnderAnElement(t *testing.T) {
 		t.Errorf("elements = %+v, want an empty set kept", variables.Elements)
 	}
 }
+
+func TestParseRejectsTwoArrayElementsWithTheSameKey(t *testing.T) {
+	// The rules of a ruleset are compared by type, so two of one type would
+	// leave nothing to pair either with.
+	_, err := parse(t, `
+rulesets:
+  - name: protect-main
+    enforcement: active
+    rules:
+      - type: deletion
+      - type: deletion
+`)
+	if err == nil {
+		t.Fatal("Parse succeeded, want the repeated rule type rejected")
+	}
+	if !strings.Contains(err.Error(), `rulesets["protect-main"].rules["deletion"]: declared twice`) {
+		t.Errorf("err = %v, want it to name the repeated rule by its key", err)
+	}
+}
+
+func TestParseRejectsRepeatedCompositeKeys(t *testing.T) {
+	_, err := parse(t, `
+rulesets:
+  - name: protect-main
+    enforcement: active
+    bypass_actors:
+      - {actor_type: Team, actor_id: 2, bypass_mode: always}
+      - {actor_type: Team, actor_id: 2, bypass_mode: pull_request}
+      - {actor_type: User, actor_id: 2, bypass_mode: always}
+`)
+	if err == nil {
+		t.Fatal("Parse succeeded, want the repeated actor rejected")
+	}
+	if !strings.Contains(err.Error(), `bypass_actors["Team", 2]: declared twice`) || strings.Contains(err.Error(), `"User"`) {
+		t.Errorf("err = %v, want only the Team actor reported", err)
+	}
+}

@@ -13,6 +13,8 @@ var environmentsNode = schema.Node{
 	Kind:    schema.KindCollection,
 	Segment: "environments",
 	Method:  http.MethodPut,
+	Match:   "name",
+	Address: "name",
 }
 
 func environmentsPath() Path { return At(testRepo).Child("environments") }
@@ -165,7 +167,7 @@ func TestEnvironmentsDelete(t *testing.T) {
 func TestEnvironmentPathIsWhereItsVariablesHang(t *testing.T) {
 	// What an element owns is addressed under that element, which is how the
 	// variables of an environment are reached.
-	path, err := Environments{}.ElementPath(environmentsPath(), map[string]any{"name": "review/pr-1"})
+	path, err := Environments{}.ElementPath(environmentsNode, environmentsPath(), map[string]any{"name": "review/pr-1"})
 	if err != nil {
 		t.Fatalf("ElementPath: %v", err)
 	}

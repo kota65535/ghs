@@ -221,3 +221,77 @@ func TestNoFieldIsAlsoAKey(t *testing.T) {
 	}
 	check(Root(), "")
 }
+
+func TestEveryCollectionDeclaresHowItsElementsAreIdentified(t *testing.T) {
+	// There is no default: which field pairs a declared element with a
+	// reported one, and which addresses it in the API, is stated per
+	// collection in gen/main.go.
+	var check func(path string, node Node)
+	check = func(path string, node Node) {
+		if node.IsCollection() {
+			if node.Match == "" {
+				t.Errorf("%s: Match is empty", path)
+			} else if _, ok := node.Field(node.Match); !ok {
+				t.Errorf("%s: Match %q is not a field of an element", path, node.Match)
+			}
+			if node.Address == "" {
+				t.Errorf("%s: Address is empty", path)
+			}
+		}
+		for _, name := range node.ChildNames() {
+			child, _ := node.Child(name)
+			check(path+"."+name, child)
+		}
+	}
+	check("", Root())
+
+	if got := at(t, "rulesets").Address; got != "id" {
+		t.Errorf("rulesets Address = %q, want id: GitHub addresses a ruleset by the id it issued", got)
+	}
+}
+
+func TestEveryArrayOfObjectsDeclaresAMatch(t *testing.T) {
+	var check func(path string, fields map[string]Field)
+	check = func(path string, fields map[string]Field) {
+		for name, field := range fields {
+			fieldPath := path + "." + name
+			if len(field.Variants) > 0 && len(field.Match) == 0 {
+				t.Errorf("%s: an array of objects with no Match", fieldPath)
+			}
+			check(fieldPath, field.Fields)
+			for _, variant := range field.Variants {
+				check(fieldPath, variant.Fields)
+			}
+		}
+	}
+	var walk func(path string, node Node)
+	walk = func(path string, node Node) {
+		check(path, node.Fields)
+		for _, name := range node.ChildNames() {
+			child, _ := node.Child(name)
+			walk(path+"."+name, child)
+		}
+	}
+	walk("", Root())
+}
+
+func TestMatchesAreKeyedByShape(t *testing.T) {
+	matches := at(t, "rulesets").Matches()
+
+	for shape, want := range map[string][]string{
+		"rules":         {"type"},
+		"bypass_actors": {"actor_type", "actor_id"},
+		"rules.parameters.required_status_checks": {"context", "integration_id"},
+	} {
+		got := matches[shape]
+		if len(got) != len(want) {
+			t.Errorf("Matches()[%q] = %v, want %v", shape, got, want)
+			continue
+		}
+		for i := range want {
+			if got[i] != want[i] {
+				t.Errorf("Matches()[%q] = %v, want %v", shape, got, want)
+			}
+		}
+	}
+}
