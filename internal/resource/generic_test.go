@@ -15,6 +15,8 @@ var variablesNode = schema.Node{
 	Kind:    schema.KindCollection,
 	Segment: "variables",
 	Method:  http.MethodPost,
+	Match:   "name",
+	Address: "name",
 }
 
 func variablesPath() Path { return At(testRepo).Child("actions").Child("variables") }
@@ -54,7 +56,7 @@ func TestGenericCollectionAcceptsABareList(t *testing.T) {
 	srv := rec.server()
 	defer srv.Close()
 
-	node := schema.Node{Kind: schema.KindCollection, Segment: "rulesets", Method: http.MethodPost}
+	node := schema.Node{Kind: schema.KindCollection, Segment: "rulesets", Method: http.MethodPost, Match: "name", Address: "id"}
 	current, err := GenericCollection{}.FetchAll(context.Background(), newTestClient(t, srv), node, At(testRepo).Child("rulesets"))
 	if err != nil {
 		t.Fatalf("FetchAll: %v", err)
@@ -207,5 +209,35 @@ func TestEachPageGivesUpOnAnEndlessList(t *testing.T) {
 	}
 	if calls != maxPages {
 		t.Errorf("made %d calls, want it capped at %d", calls, maxPages)
+	}
+}
+
+func TestGenericCollectionAddressesAnElementByTheFieldTheNodeStates(t *testing.T) {
+	// Which field addresses an element is stated per collection, and is read
+	// from the element GitHub reports: it may be something the file never
+	// declares.
+	node := schema.Node{Kind: schema.KindCollection, Segment: "things", Method: http.MethodPost, Match: "name", Address: "number"}
+	current := map[string]any{"name": "a", "number": float64(42)}
+
+	for name, act := range map[string]func(c Client) error{
+		"Update": func(c Client) error {
+			return GenericCollection{}.Update(context.Background(), c, node, At(testRepo).Child("things"), current, map[string]any{"name": "a"})
+		},
+		"Delete": func(c Client) error {
+			return GenericCollection{}.Delete(context.Background(), c, node, At(testRepo).Child("things"), current)
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			rec := newRecorder(t, nil)
+			srv := rec.server()
+			defer srv.Close()
+
+			if err := act(newTestClient(t, srv)); err != nil {
+				t.Fatalf("%s: %v", name, err)
+			}
+			if got := rec.only(); got.path != "/repos/kota65535/ghs/things/42" {
+				t.Errorf("path = %s, want the element addressed by its number", got.path)
+			}
+		})
 	}
 }

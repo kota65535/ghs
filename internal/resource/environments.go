@@ -9,8 +9,9 @@ import (
 )
 
 // Environments manages the repository's deployment environments, whose
-// reported shape differs from the one that declares them.
-type Environments struct{}
+// reported shape differs from the one that declares them. Elements are
+// addressed as any collection's are.
+type Environments struct{ GenericCollection }
 
 // FetchAll implements Collection.
 func (Environments) FetchAll(ctx context.Context, c Client, node schema.Node, path Path) (map[string]map[string]any, error) {
@@ -23,7 +24,7 @@ func (Environments) FetchAll(ctx context.Context, c Client, node schema.Node, pa
 	for _, environment := range listed {
 		declared = append(declared, asRequest(environment))
 	}
-	return byName(declared, node.Segment)
+	return byKey(declared, node)
 }
 
 // Create implements Collection.
@@ -31,16 +32,18 @@ func (Environments) FetchAll(ctx context.Context, c Client, node schema.Node, pa
 // Creating and updating an environment are the same request: PUT takes the
 // name in the path and settles the environment either way.
 func (e Environments) Create(ctx context.Context, c Client, node schema.Node, path Path, desired map[string]any) error {
-	return e.settle(ctx, c, path, desired, "create")
+	return e.settle(ctx, c, node, path, desired, "create")
 }
 
 // Update implements Collection.
 func (e Environments) Update(ctx context.Context, c Client, node schema.Node, path Path, current, desired map[string]any) error {
-	return e.settle(ctx, c, path, desired, "update")
+	return e.settle(ctx, c, node, path, desired, "update")
 }
 
-func (e Environments) settle(ctx context.Context, c Client, path Path, desired map[string]any, what string) error {
-	target, err := e.ElementPath(path, desired)
+func (e Environments) settle(ctx context.Context, c Client, node schema.Node, path Path, desired map[string]any, what string) error {
+	// An environment being created has only the declaration to address it
+	// by, and PUT takes the same name either way.
+	target, err := e.ElementPath(node, path, desired)
 	if err != nil {
 		return err
 	}
@@ -54,7 +57,7 @@ func (e Environments) settle(ctx context.Context, c Client, path Path, desired m
 
 // Delete implements Collection.
 func (e Environments) Delete(ctx context.Context, c Client, node schema.Node, path Path, current map[string]any) error {
-	target, err := e.ElementPath(path, current)
+	target, err := e.ElementPath(node, path, current)
 	if err != nil {
 		return err
 	}
@@ -62,15 +65,6 @@ func (e Environments) Delete(ctx context.Context, c Client, node schema.Node, pa
 		return fmt.Errorf("delete %s: %w", target, err)
 	}
 	return nil
-}
-
-// ElementPath implements Collection.
-func (Environments) ElementPath(path Path, element map[string]any) (Path, error) {
-	name, err := nameOf(element)
-	if err != nil {
-		return Path{}, err
-	}
-	return path.Element(name), nil
 }
 
 // withoutName returns the element without the name that identifies it.

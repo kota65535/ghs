@@ -222,3 +222,31 @@ func TestApplyStopsAtTheFirstFailure(t *testing.T) {
 		t.Errorf("made %v, want nothing after the failure", client.calls())
 	}
 }
+
+func TestPlanIgnoresTheOrderGitHubReportsRulesIn(t *testing.T) {
+	// The persistent difference this was written for: GitHub reports the rules
+	// of a ruleset in an order of its own, and a plan that paired them by
+	// position never came up clean however often it was applied.
+	client := &fakeClient{reads: map[string]string{
+		"repos/kota65535/ghs/rulesets": `[{"id": 7, "name": "protect-main"}]`,
+		"repos/kota65535/ghs/rulesets/7": `{"id": 7, "name": "protect-main", "enforcement": "active", "rules": [
+			{"type": "pull_request", "parameters": {"required_approving_review_count": 1, "dismiss_stale_reviews_on_push": false}},
+			{"type": "deletion"}
+		]}`,
+	}}
+
+	p := planFor(t, client, `
+rulesets:
+  - name: protect-main
+    enforcement: active
+    rules:
+      - type: deletion
+      - type: pull_request
+        parameters:
+          required_approving_review_count: 1
+`)
+
+	if !p.plan.Empty() {
+		t.Errorf("plan = %+v, want no changes for a reordering", p.plan)
+	}
+}

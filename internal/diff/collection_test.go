@@ -110,7 +110,7 @@ func TestComputeIgnoresFieldsTheFileDoesNotDeclare(t *testing.T) {
 	})
 	desired := element(map[string]any{"name": "protect-main", "enforcement": "active"})
 
-	if changes := Compute(current, desired); len(changes) != 0 {
+	if changes := Compute(current, desired, nil); len(changes) != 0 {
 		t.Fatalf("got %+v, want no changes", changes)
 	}
 }

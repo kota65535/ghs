@@ -10,7 +10,7 @@ func TestNormalizeMakesYAMLIntegersComparableToAPIValues(t *testing.T) {
 	current := map[string]any{"required_approving_review_count": float64(1)}
 
 	// The premise: comparing the two type shapes directly reports a change.
-	if got := Compute(current, desired); len(got) != 1 {
+	if got := Compute(current, desired, nil); len(got) != 1 {
 		t.Fatalf("got %d changes without normalization, want 1", len(got))
 	}
 
@@ -18,7 +18,7 @@ func TestNormalizeMakesYAMLIntegersComparableToAPIValues(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NormalizeMap: %v", err)
 	}
-	if changes := Compute(current, normalized); len(changes) != 0 {
+	if changes := Compute(current, normalized, nil); len(changes) != 0 {
 		t.Fatalf("got %d changes after normalization, want 0: %+v", len(changes), changes)
 	}
 }
@@ -31,7 +31,7 @@ func TestNormalizeKeepsNestedIntegers(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NormalizeMap: %v", err)
 	}
-	if changes := Compute(current, normalized); len(changes) != 0 {
+	if changes := Compute(current, normalized, nil); len(changes) != 0 {
 		t.Fatalf("got %d changes, want 0: %+v", len(changes), changes)
 	}
 }
@@ -40,7 +40,7 @@ func TestComputeIgnoresFieldsNotDeclared(t *testing.T) {
 	current := map[string]any{"has_issues": true, "has_wiki": false}
 	desired := map[string]any{"has_issues": true}
 
-	if changes := Compute(current, desired); len(changes) != 0 {
+	if changes := Compute(current, desired, nil); len(changes) != 0 {
 		t.Fatalf("got %+v, want no changes for undeclared fields", changes)
 	}
 }
@@ -49,7 +49,7 @@ func TestComputeReportsChangedField(t *testing.T) {
 	current := map[string]any{"allow_auto_merge": false}
 	desired := map[string]any{"allow_auto_merge": true}
 
-	changes := Compute(current, desired)
+	changes := Compute(current, desired, nil)
 	if len(changes) != 1 {
 		t.Fatalf("got %d changes, want 1", len(changes))
 	}
@@ -68,7 +68,7 @@ func TestComputeReportsChangedField(t *testing.T) {
 func TestComputeTreatsNullAsAValue(t *testing.T) {
 	// Declaring null means "clear this field", which is a change when GitHub
 	// reports a value and no change when it already reports null.
-	changes := Compute(map[string]any{"homepage": "https://example.com"}, map[string]any{"homepage": nil})
+	changes := Compute(map[string]any{"homepage": "https://example.com"}, map[string]any{"homepage": nil}, nil)
 	if len(changes) != 1 {
 		t.Fatalf("got %d changes, want 1", len(changes))
 	}
@@ -76,13 +76,13 @@ func TestComputeTreatsNullAsAValue(t *testing.T) {
 		t.Errorf("Desired = %v, want nil", changes[0].Desired)
 	}
 
-	if changes := Compute(map[string]any{"homepage": nil}, map[string]any{"homepage": nil}); len(changes) != 0 {
+	if changes := Compute(map[string]any{"homepage": nil}, map[string]any{"homepage": nil}, nil); len(changes) != 0 {
 		t.Fatalf("got %+v, want no change when both are null", changes)
 	}
 }
 
 func TestComputeMarksFieldsAbsentFromResponse(t *testing.T) {
-	changes := Compute(map[string]any{}, map[string]any{"web_commit_signoff_required": true})
+	changes := Compute(map[string]any{}, map[string]any{"web_commit_signoff_required": true}, nil)
 	if len(changes) != 1 {
 		t.Fatalf("got %d changes, want 1", len(changes))
 	}
@@ -107,7 +107,7 @@ func TestComputeRecursesIntoObjects(t *testing.T) {
 		},
 	}
 
-	changes := Compute(current, desired)
+	changes := Compute(current, desired, nil)
 	if len(changes) != 1 {
 		t.Fatalf("got %d changes, want 1: %+v", len(changes), changes)
 	}
@@ -124,7 +124,7 @@ func TestComputeReportsLeavesWhenParentObjectIsAbsent(t *testing.T) {
 		},
 	}
 
-	changes := Compute(map[string]any{}, desired)
+	changes := Compute(map[string]any{}, desired, nil)
 	if len(changes) != 1 {
 		t.Fatalf("got %d changes, want 1: %+v", len(changes), changes)
 	}
@@ -139,12 +139,12 @@ func TestComputeReportsLeavesWhenParentObjectIsAbsent(t *testing.T) {
 func TestComputeComparesArraysIncludingOrder(t *testing.T) {
 	current := map[string]any{"items": []any{"a", "b"}}
 
-	if changes := Compute(current, map[string]any{"items": []any{"a", "b"}}); len(changes) != 0 {
+	if changes := Compute(current, map[string]any{"items": []any{"a", "b"}}, nil); len(changes) != 0 {
 		t.Fatalf("got %+v, want no change for identical arrays", changes)
 	}
 	// Reordering is a change: elements are paired by index, so both positions
 	// are reported.
-	changes := Compute(current, map[string]any{"items": []any{"b", "a"}})
+	changes := Compute(current, map[string]any{"items": []any{"b", "a"}}, nil)
 	if len(changes) != 2 {
 		t.Fatalf("got %d changes, want 2 for a reordered array: %+v", len(changes), changes)
 	}
@@ -178,7 +178,7 @@ func TestComputeIgnoresServerDefaultsInsideArrayElements(t *testing.T) {
 		},
 	}
 
-	if changes := Compute(current, desired); len(changes) != 0 {
+	if changes := Compute(current, desired, nil); len(changes) != 0 {
 		t.Fatalf("got %+v, want no change when only undeclared defaults differ", changes)
 	}
 }
@@ -195,7 +195,7 @@ func TestComputeReportsTheDifferingFieldInsideAnArrayElement(t *testing.T) {
 		},
 	}
 
-	changes := Compute(current, desired)
+	changes := Compute(current, desired, nil)
 	if len(changes) != 1 {
 		t.Fatalf("got %d changes, want 1: %+v", len(changes), changes)
 	}
@@ -212,7 +212,7 @@ func TestComputeReportsPositionsPastTheEndOfAnArray(t *testing.T) {
 		map[string]any{"type": "non_fast_forward"},
 	}}
 
-	changes := Compute(current, desired)
+	changes := Compute(current, desired, nil)
 	if len(changes) != 1 {
 		t.Fatalf("got %d changes, want 1: %+v", len(changes), changes)
 	}
@@ -226,7 +226,7 @@ func TestComputeReportsPositionsPastTheEndOfAnArray(t *testing.T) {
 	}
 
 	// The other way round, a position the declaration does not reach is going.
-	changes = Compute(desired, current)
+	changes = Compute(desired, current, nil)
 	if len(changes) != 1 {
 		t.Fatalf("got %d changes, want 1: %+v", len(changes), changes)
 	}
@@ -263,7 +263,7 @@ func TestComputeIgnoresServerDefaultsEvenWhenAnArrayChangesLength(t *testing.T) 
 		},
 	}
 
-	changes := Compute(current, desired)
+	changes := Compute(current, desired, nil)
 	if len(changes) != 1 {
 		t.Fatalf("got %d changes, want only the dropped entry: %+v", len(changes), changes)
 	}
@@ -276,7 +276,7 @@ func TestComputeComparesScalarArrayElementsWholly(t *testing.T) {
 	current := map[string]any{"include": []any{"~DEFAULT_BRANCH", "refs/heads/release/*"}}
 	desired := map[string]any{"include": []any{"~DEFAULT_BRANCH", "refs/heads/main"}}
 
-	changes := Compute(current, desired)
+	changes := Compute(current, desired, nil)
 	if len(changes) != 1 {
 		t.Fatalf("got %d changes, want 1: %+v", len(changes), changes)
 	}
@@ -291,7 +291,7 @@ func TestComputeReportsArrayElementAgainstAMismatchedType(t *testing.T) {
 	current := map[string]any{"rules": []any{"pull_request"}}
 	desired := map[string]any{"rules": []any{map[string]any{"type": "pull_request"}}}
 
-	changes := Compute(current, desired)
+	changes := Compute(current, desired, nil)
 	if len(changes) != 1 {
 		t.Fatalf("got %d changes, want 1: %+v", len(changes), changes)
 	}
@@ -304,7 +304,7 @@ func TestComputeSortsChangesByPath(t *testing.T) {
 	current := map[string]any{"z": false, "a": false, "m": false}
 	desired := map[string]any{"z": true, "a": true, "m": true}
 
-	changes := Compute(current, desired)
+	changes := Compute(current, desired, nil)
 	var paths []string
 	for _, c := range changes {
 		paths = append(paths, c.Label)

@@ -9,12 +9,14 @@ import (
 )
 
 // Rulesets manages the repository's rulesets, which GitHub addresses by an id
-// it issues rather than by the name the settings file matches them on.
-type Rulesets struct{}
+// it issues rather than by the name the settings file matches them on. The
+// schema states both, so addressing is the generic one; what is particular to
+// rulesets is how they are read.
+type Rulesets struct{ GenericCollection }
 
-// idField is what GitHub issues for a ruleset and what addresses it
-// afterwards. It is not declared in the settings file, so it is only ever read
-// from the current state.
+// idField is the id GitHub issues for what it stores. A ruleset's is not
+// declared in the settings file, so it is only ever read from the current
+// state.
 const idField = "id"
 
 // FetchAll implements Collection.
@@ -23,7 +25,7 @@ const idField = "id"
 // ruleset as the full object, but whether it fills in the rules and conditions
 // is not something the description settles, and a plan built from a listing
 // that leaves them out would report every rule as missing.
-func (Rulesets) FetchAll(ctx context.Context, c Client, node schema.Node, path Path) (map[string]map[string]any, error) {
+func (r Rulesets) FetchAll(ctx context.Context, c Client, node schema.Node, path Path) (map[string]map[string]any, error) {
 	// includes_parents is on by default and brings in the rulesets an
 	// organization applies to this repository. Those cannot be managed here,
 	// and leaving them in would have every plan offer to delete them.
@@ -43,7 +45,7 @@ func (Rulesets) FetchAll(ctx context.Context, c Client, node schema.Node, path P
 
 	full := make([]map[string]any, 0, len(listed))
 	for _, summary := range listed {
-		target, err := Rulesets{}.ElementPath(path, summary)
+		target, err := r.ElementPath(node, path, summary)
 		if err != nil {
 			return nil, err
 		}
@@ -55,58 +57,37 @@ func (Rulesets) FetchAll(ctx context.Context, c Client, node schema.Node, path P
 		full = append(full, ruleset)
 	}
 
-	return byName(full, node.Segment)
+	return byKey(full, node)
 }
 
 // Create implements Collection.
 func (Rulesets) Create(ctx context.Context, c Client, node schema.Node, path Path, desired map[string]any) error {
 	if err := send(ctx, c, http.MethodPost, path.String(), desired); err != nil {
-		return fmt.Errorf("create ruleset %v in %s: %w", desired[elementName], path, err)
+		return fmt.Errorf("create ruleset %v in %s: %w", desired[node.Match], path, err)
 	}
 	return nil
 }
 
 // Update implements Collection.
 func (r Rulesets) Update(ctx context.Context, c Client, node schema.Node, path Path, current, desired map[string]any) error {
-	target, err := r.ElementPath(path, current)
+	target, err := r.ElementPath(node, path, current)
 	if err != nil {
 		return err
 	}
 	if err := send(ctx, c, http.MethodPut, target.String(), desired); err != nil {
-		return fmt.Errorf("update ruleset %v: %w", current[elementName], err)
+		return fmt.Errorf("update ruleset %v: %w", current[node.Match], err)
 	}
 	return nil
 }
 
 // Delete implements Collection.
 func (r Rulesets) Delete(ctx context.Context, c Client, node schema.Node, path Path, current map[string]any) error {
-	target, err := r.ElementPath(path, current)
+	target, err := r.ElementPath(node, path, current)
 	if err != nil {
 		return err
 	}
 	if err := deleteAt(ctx, c, target.String()); err != nil {
-		return fmt.Errorf("delete ruleset %v: %w", current[elementName], err)
+		return fmt.Errorf("delete ruleset %v: %w", current[node.Match], err)
 	}
 	return nil
-}
-
-// ElementPath implements Collection, addressing a ruleset by the id GitHub
-// issued for it.
-//
-// The id arrives as a JSON number, so it is a float64 here; rendering it with
-// %v would spell a large one in exponent notation and produce a path the API
-// does not recognize.
-func (Rulesets) ElementPath(path Path, element map[string]any) (Path, error) {
-	switch id := element[idField].(type) {
-	case float64:
-		return path.Element(fmt.Sprintf("%d", int64(id))), nil
-	case int64:
-		return path.Element(fmt.Sprintf("%d", id)), nil
-	case int:
-		return path.Element(fmt.Sprintf("%d", id)), nil
-	case string:
-		return path.Element(id), nil
-	default:
-		return Path{}, fmt.Errorf("ruleset %v has no usable id", element[elementName])
-	}
 }

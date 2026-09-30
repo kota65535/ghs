@@ -13,6 +13,8 @@ var rulesetsNode = schema.Node{
 	Kind:    schema.KindCollection,
 	Segment: "rulesets",
 	Method:  http.MethodPost,
+	Match:   "name",
+	Address: "id",
 }
 
 func rulesetsPath() Path { return At(testRepo).Child("rulesets") }
@@ -127,7 +129,7 @@ func TestRulesetsAreAddressedByTheIDGitHubIssued(t *testing.T) {
 func TestRulesetIDIsRenderedAsAnInteger(t *testing.T) {
 	// The id arrives as a JSON number. Spelling a large one in exponent
 	// notation would build a path the API does not recognize.
-	path, err := Rulesets{}.ElementPath(rulesetsPath(), map[string]any{idField: float64(123456789)})
+	path, err := Rulesets{}.ElementPath(rulesetsNode, rulesetsPath(), map[string]any{idField: float64(123456789)})
 	if err != nil {
 		t.Fatalf("ElementPath: %v", err)
 	}
@@ -135,7 +137,7 @@ func TestRulesetIDIsRenderedAsAnInteger(t *testing.T) {
 		t.Errorf("path = %q, want it to end in the id", path)
 	}
 
-	if _, err := (Rulesets{}).ElementPath(rulesetsPath(), map[string]any{"name": "no-id"}); err == nil {
+	if _, err := (Rulesets{}).ElementPath(rulesetsNode, rulesetsPath(), map[string]any{"name": "no-id"}); err == nil {
 		t.Error("ElementPath succeeded without an id, want an error")
 	}
 }

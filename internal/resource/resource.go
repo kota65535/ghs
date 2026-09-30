@@ -117,7 +117,7 @@ type Collection interface {
 
 	// ElementPath returns the path of one element, which is what the nodes
 	// below it hang off.
-	ElementPath(path Path, element map[string]any) (Path, error)
+	ElementPath(node schema.Node, path Path, element map[string]any) (Path, error)
 }
 
 // objects and collections hold the nodes that need something other than the

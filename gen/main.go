@@ -42,6 +42,14 @@ type operation struct {
 
 	// conditional marks a path that exists only in some repositories.
 	conditional bool
+
+	// match and address are required for a collection and empty for anything
+	// else. match is the field a declared element and a reported one are
+	// paired by; address is the field of the reported element whose value
+	// addresses it in the API. Neither has a default: the description does not
+	// say what identifies an element, so each collection says it here.
+	match   string
+	address string
 }
 
 // operations lists every node ghs generates a description for. Adding a
@@ -59,17 +67,48 @@ var operations = []operation{
 
 	{key: []string{"topics"}, path: "/repos/{owner}/{repo}/topics", method: "put", kind: "KindObject"},
 
-	{key: []string{"labels"}, path: "/repos/{owner}/{repo}/labels", method: "post", kind: "KindCollection"},
-	{key: []string{"rulesets"}, path: "/repos/{owner}/{repo}/rulesets", method: "post", kind: "KindCollection"},
-	{key: []string{"environments"}, path: "/repos/{owner}/{repo}/environments/{environment_name}", method: "put", kind: "KindCollection"},
-	{key: []string{"environments", "variables"}, path: "/repos/{owner}/{repo}/environments/{environment_name}/variables", method: "post", kind: "KindCollection"},
+	{key: []string{"labels"}, path: "/repos/{owner}/{repo}/labels", method: "post", kind: "KindCollection", match: "name", address: "name"},
+	{key: []string{"rulesets"}, path: "/repos/{owner}/{repo}/rulesets", method: "post", kind: "KindCollection", match: "name", address: "id"},
+	{key: []string{"environments"}, path: "/repos/{owner}/{repo}/environments/{environment_name}", method: "put", kind: "KindCollection", match: "name", address: "name"},
+	{key: []string{"environments", "variables"}, path: "/repos/{owner}/{repo}/environments/{environment_name}/variables", method: "post", kind: "KindCollection", match: "name", address: "name"},
 
-	{key: []string{"actions", "variables"}, path: "/repos/{owner}/{repo}/actions/variables", method: "post", kind: "KindCollection"},
+	{key: []string{"actions", "variables"}, path: "/repos/{owner}/{repo}/actions/variables", method: "post", kind: "KindCollection", match: "name", address: "name"},
 	{key: []string{"actions", "permissions"}, path: "/repos/{owner}/{repo}/actions/permissions", method: "put", kind: "KindObject"},
 	{key: []string{"actions", "permissions", "workflow"}, path: "/repos/{owner}/{repo}/actions/permissions/workflow", method: "put", kind: "KindObject"},
 	{key: []string{"actions", "permissions", "fork-pr-contributor-approval"}, path: "/repos/{owner}/{repo}/actions/permissions/fork-pr-contributor-approval", method: "put", kind: "KindObject", conditional: true},
 	{key: []string{"actions", "permissions", "selected-actions"}, path: "/repos/{owner}/{repo}/actions/permissions/selected-actions", method: "put", kind: "KindObject", conditional: true},
 	{key: []string{"actions", "permissions", "artifact-and-log-retention"}, path: "/repos/{owner}/{repo}/actions/permissions/artifact-and-log-retention", method: "put", kind: "KindObject"},
+}
+
+// arrays states what identifies an element of every array of objects among the
+// fields, keyed by the node's keys followed by the field names down to the
+// array, joined by dots. An array reached through the elements of another is
+// named without them: rulesets.rules.parameters.required_status_checks holds
+// whichever rule the checks belong to.
+//
+// Every array of objects needs an entry, and generation fails on one that has
+// none or on an entry that no longer names an array: comparing the elements
+// position by position reports a reordering GitHub makes as a change that
+// applying never removes.
+var arrays = map[string][]string{
+	"security_and_analysis.secret_scanning_delegated_bypass_options.reviewers": {"reviewer_type", "reviewer_id"},
+
+	"environments.reviewers": {"type", "id"},
+
+	"rulesets.bypass_actors": {"actor_type", "actor_id"},
+	// A ruleset holds at most one rule of each type.
+	"rulesets.rules": {"type"},
+	"rulesets.rules.parameters.code_scanning_tools":                  {"tool"},
+	"rulesets.rules.parameters.dismissal_restriction.allowed_actors": {"type", "id"},
+	// GitHub rejects the same reviewer twice ("This team is already added as
+	// a reviewer"), whatever file patterns each would review.
+	"rulesets.rules.parameters.required_reviewers":     {"reviewer.type", "reviewer.id"},
+	"rulesets.rules.parameters.required_status_checks": {"context", "integration_id"},
+	// Whether the same workflow may be required at two refs is not known, so
+	// the ref is part of the key: at worst a changed ref reads as one workflow
+	// removed and another added, where leaving it out could reject a valid
+	// declaration as a duplicate.
+	"rulesets.rules.parameters.workflows": {"repository_id", "path", "ref"},
 }
 
 const (
@@ -189,6 +228,7 @@ type field struct {
 	Default     any
 	Fields      map[string]field
 	Variants    map[string]field
+	Match       []string
 }
 
 // node mirrors schema.Node during generation.
@@ -198,6 +238,8 @@ type node struct {
 	method      string
 	summary     string
 	conditional bool
+	match       string
+	address     string
 	from        string // the operation it was generated from, for a comment
 
 	fields map[string]field
@@ -272,6 +314,11 @@ func buildTree(spec map[string]any) (*node, error) {
 		target.method = strings.ToUpper(op.method)
 		target.summary = operationSummary(spec, op)
 		target.conditional = op.conditional
+		if (op.kind == "KindCollection") != (op.match != "" && op.address != "") {
+			return nil, fmt.Errorf("%s: a collection states both match and address, and nothing else states either", strings.Join(op.key, "."))
+		}
+		target.match = op.match
+		target.address = op.address
 		target.fields = c.properties(props, nil)
 		target.from = fmt.Sprintf("%s %s", strings.ToUpper(op.method), op.path)
 		// The root is where paths are measured from, so it adds nothing to
@@ -284,7 +331,69 @@ func buildTree(spec map[string]any) (*node, error) {
 	if err := checkCollisions(root, ""); err != nil {
 		return nil, err
 	}
+	if err := applyMatches(root); err != nil {
+		return nil, err
+	}
 	return root, nil
+}
+
+// applyMatches gives every array of objects the match stated for it in arrays,
+// failing on an array that has none and on an entry that names no array.
+func applyMatches(root *node) error {
+	used := map[string]bool{}
+	var missing []string
+
+	var fields func(path string, fs map[string]field)
+	fields = func(path string, fs map[string]field) {
+		for name, f := range fs {
+			fieldPath := name
+			if path != "" {
+				fieldPath = path + "." + name
+			}
+			if len(f.Variants) > 0 {
+				if match, ok := arrays[fieldPath]; ok {
+					f.Match = match
+					used[fieldPath] = true
+				} else {
+					missing = append(missing, fieldPath)
+				}
+			}
+			fields(fieldPath, f.Fields)
+			for key, variant := range f.Variants {
+				fields(fieldPath, variant.Fields)
+				f.Variants[key] = variant
+			}
+			fs[name] = f
+		}
+	}
+	var nodes func(path string, n *node)
+	nodes = func(path string, n *node) {
+		fields(path, n.fields)
+		for name, child := range n.nodes {
+			childPath := name
+			if path != "" {
+				childPath = path + "." + name
+			}
+			nodes(childPath, child)
+		}
+	}
+	nodes("", root)
+
+	var unused []string
+	for path := range arrays {
+		if !used[path] {
+			unused = append(unused, path)
+		}
+	}
+	sort.Strings(missing)
+	sort.Strings(unused)
+	if len(missing) > 0 {
+		return fmt.Errorf("arrays of objects with no match in arrays: %s", strings.Join(missing, ", "))
+	}
+	if len(unused) > 0 {
+		return fmt.Errorf("entries in arrays that name no array of objects: %s", strings.Join(unused, ", "))
+	}
+	return nil
 }
 
 // lastSegment is what an operation's path adds under its parent's, which is
@@ -335,6 +444,12 @@ func writeNode(b *strings.Builder, n *node, depth int) {
 	}
 	if n.conditional {
 		fmt.Fprintf(b, "%s\tConditional: true,\n", indent)
+	}
+	if n.match != "" {
+		fmt.Fprintf(b, "%s\tMatch: %q,\n", indent, n.match)
+	}
+	if n.address != "" {
+		fmt.Fprintf(b, "%s\tAddress: %q,\n", indent, n.address)
 	}
 
 	if len(n.fields) > 0 {
@@ -654,6 +769,13 @@ func writeField(b *strings.Builder, f field, depth int) {
 	}
 	if literal, ok := defaultLiteral(f.Default); ok {
 		parts = append(parts, fmt.Sprintf("Default: %s", literal))
+	}
+	if len(f.Match) > 0 {
+		quoted := make([]string, len(f.Match))
+		for i, v := range f.Match {
+			quoted[i] = fmt.Sprintf("%q", v)
+		}
+		parts = append(parts, fmt.Sprintf("Match: []string{%s}", strings.Join(quoted, ", ")))
 	}
 	fmt.Fprintf(b, "%s", strings.Join(parts, ", "))
 	written := len(parts) > 0

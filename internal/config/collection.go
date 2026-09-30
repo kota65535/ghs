@@ -7,10 +7,6 @@ import (
 	"github.com/kota65535/ghs/internal/schema"
 )
 
-// nameField identifies a collection element. Every element carries it, whether
-// the create request sends it in the body or in the path.
-const nameField = schema.NameField
-
 // parseCollectionNode validates a declared collection: the elements themselves
 // and whatever is declared under each of them.
 func parseCollectionNode(path string, node schema.Node, declared any) (*Declaration, []string) {
@@ -40,9 +36,12 @@ func parseCollectionNode(path string, node schema.Node, declared any) (*Declarat
 			continue
 		}
 
-		name, ok := fields[nameField].(string)
+		// The field that identifies an element is stated per collection, and
+		// every element must carry it: it is what pairs the element with the
+		// one GitHub reports.
+		name, ok := fields[node.Match].(string)
 		if !ok || name == "" {
-			problems = append(problems, fmt.Sprintf("%s: %s is required and must be a non-empty string", elementPath, nameField))
+			problems = append(problems, fmt.Sprintf("%s: %s is required and must be a non-empty string", elementPath, node.Match))
 			continue
 		}
 

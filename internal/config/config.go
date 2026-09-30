@@ -287,6 +287,30 @@ func validateElements(path string, items []any, field schema.Field) []string {
 		problems = append(problems, validateFields(elementPath, element, variant.Fields)...)
 	}
 
+	return append(problems, repeatedKeys(path, items, field.Match)...)
+}
+
+// repeatedKeys reports the elements of an array that share a key with an
+// earlier one. The elements are compared by key, so two with the same one leave
+// nothing to pair either of them with.
+func repeatedKeys(path string, items []any, match []string) []string {
+	if len(match) == 0 {
+		return nil
+	}
+
+	var problems []string
+	seen := map[string]bool{}
+	for _, item := range items {
+		element, ok := item.(map[string]any)
+		if !ok {
+			continue
+		}
+		key := diff.KeyOf(element, match)
+		if seen[key] {
+			problems = append(problems, fmt.Sprintf("%s[%s]: declared twice", path, key))
+		}
+		seen[key] = true
+	}
 	return problems
 }
 

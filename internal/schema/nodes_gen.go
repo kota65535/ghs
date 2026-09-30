@@ -55,7 +55,7 @@ var generated = Node{
 				"status": {Type: "string", Description: "Can be `enabled` or `disabled`."},
 			}},
 			"secret_scanning_delegated_bypass_options": {Type: "object", Description: "Feature options for secret scanning delegated bypass.\nThis object is only honored when `security_and_analysis.secret_scanning_delegated_bypass.status` is set to `enabled`.\nYou can send this object in the same request as `secret_scanning_delegated_bypass`, or update just the options in a separate request.", Fields: map[string]Field{
-				"reviewers": {Type: "array", Description: "The bypass reviewers for secret scanning delegated bypass.\nIf you omit this field, the existing set of reviewers is unchanged.", Variants: map[string]Field{
+				"reviewers": {Type: "array", Description: "The bypass reviewers for secret scanning delegated bypass.\nIf you omit this field, the existing set of reviewers is unchanged.", Match: []string{"reviewer_type", "reviewer_id"}, Variants: map[string]Field{
 					"": {Type: "object", Fields: map[string]Field{
 						"mode":          {Type: "string", Enum: []string{"ALWAYS", "EXEMPT"}, Description: "The bypass mode for the reviewer", Default: "ALWAYS"},
 						"reviewer_id":   {Type: "integer", Description: "The ID of the team or role selected as a bypass reviewer"},
@@ -145,6 +145,8 @@ var generated = Node{
 					Segment: "variables",
 					Method:  "POST",
 					Summary: "Create a repository variable",
+					Match:   "name",
+					Address: "name",
 					// from POST /repos/{owner}/{repo}/actions/variables
 					Fields: map[string]Field{
 						"name":  {Type: "string", Description: "The name of the variable."},
@@ -158,6 +160,8 @@ var generated = Node{
 			Segment: "environments",
 			Method:  "PUT",
 			Summary: "Create or update an environment",
+			Match:   "name",
+			Address: "name",
 			// from PUT /repos/{owner}/{repo}/environments/{environment_name}
 			Fields: map[string]Field{
 				"deployment_branch_policy": {Type: "object", Description: "The type of deployment branch policy for this environment. To allow all branches to deploy, set to `null`.", Fields: map[string]Field{
@@ -165,7 +169,7 @@ var generated = Node{
 					"protected_branches":     {Type: "boolean", Description: "Whether only branches with branch protection rules can deploy to this environment. If `protected_branches` is `true`, `custom_branch_policies` must be `false`; if `protected_branches` is `false`, `custom_branch_policies` must be `true`."},
 				}},
 				"prevent_self_review": {Type: "boolean", Description: "Whether or not a user who created the job is prevented from approving their own job."},
-				"reviewers": {Type: "array", Description: "The people or teams that may review jobs that reference the environment. You can list up to six users or teams as reviewers. The reviewers must have at least read access to the repository. Only one of the required reviewers needs to approve the job for it to proceed.", Variants: map[string]Field{
+				"reviewers": {Type: "array", Description: "The people or teams that may review jobs that reference the environment. You can list up to six users or teams as reviewers. The reviewers must have at least read access to the repository. Only one of the required reviewers needs to approve the job for it to proceed.", Match: []string{"type", "id"}, Variants: map[string]Field{
 					"": {Type: "object", Fields: map[string]Field{
 						"id":   {Type: "integer", Description: "The id of the user or team who can review the deployment"},
 						"type": {Type: "string", Enum: []string{"Team", "User"}, Description: "The type of reviewer."},
@@ -179,6 +183,8 @@ var generated = Node{
 					Segment: "variables",
 					Method:  "POST",
 					Summary: "Create an environment variable",
+					Match:   "name",
+					Address: "name",
 					// from POST /repos/{owner}/{repo}/environments/{environment_name}/variables
 					Fields: map[string]Field{
 						"name":  {Type: "string", Description: "The name of the variable."},
@@ -192,6 +198,8 @@ var generated = Node{
 			Segment: "labels",
 			Method:  "POST",
 			Summary: "Create a label",
+			Match:   "name",
+			Address: "name",
 			// from POST /repos/{owner}/{repo}/labels
 			Fields: map[string]Field{
 				"color":       {Type: "string", Description: "The [hexadecimal color code](http://www.color-hex.com/) for the label, without the leading `#`."},
@@ -204,9 +212,11 @@ var generated = Node{
 			Segment: "rulesets",
 			Method:  "POST",
 			Summary: "Create a repository ruleset",
+			Match:   "name",
+			Address: "id",
 			// from POST /repos/{owner}/{repo}/rulesets
 			Fields: map[string]Field{
-				"bypass_actors": {Type: "array", Description: "The actors that can bypass the rules in this ruleset", Variants: map[string]Field{
+				"bypass_actors": {Type: "array", Description: "The actors that can bypass the rules in this ruleset", Match: []string{"actor_type", "actor_id"}, Variants: map[string]Field{
 					"": {Type: "object", Description: "An actor that can bypass rules in a ruleset", Fields: map[string]Field{
 						"actor_id":    {Type: "integer", Description: "The ID of the actor that can bypass a ruleset. Required for `Integration`, `RepositoryRole`, `Team`, and `User` actor types. If `actor_type` is `OrganizationAdmin`, `actor_id` is ignored. If `actor_type` is `DeployKey`, this should be null. `OrganizationAdmin` is not applicable for personal repositories."},
 						"actor_type":  {Type: "string", Enum: []string{"DeployKey", "Integration", "OrganizationAdmin", "RepositoryRole", "Team", "User"}, Description: "The type of actor that can bypass a ruleset."},
@@ -221,7 +231,7 @@ var generated = Node{
 				}},
 				"enforcement": {Type: "string", Enum: []string{"active", "disabled", "evaluate"}, Description: "The enforcement level of the ruleset. `evaluate` allows admins to test rules before enforcing them. Admins can view insights on the Rule Insights page (`evaluate` is only available with GitHub Enterprise)."},
 				"name":        {Type: "string", Description: "The name of the ruleset."},
-				"rules": {Type: "array", Description: "An array of rules within the ruleset.", Variants: map[string]Field{
+				"rules": {Type: "array", Description: "An array of rules within the ruleset.", Match: []string{"type"}, Variants: map[string]Field{
 					"branch_name_pattern": {Type: "object", Description: "Parameters to be used for the branch_name_pattern rule", Fields: map[string]Field{
 						"parameters": {Type: "object", Fields: map[string]Field{
 							"name":     {Type: "string", Description: "How this rule appears when configuring it."},
@@ -246,7 +256,7 @@ var generated = Node{
 					}},
 					"code_scanning": {Type: "object", Description: "Choose which tools must provide code scanning results before the reference is updated. When configured, code scanning must be enabled and have results for both the commit and the reference being updated.", Fields: map[string]Field{
 						"parameters": {Type: "object", Fields: map[string]Field{
-							"code_scanning_tools": {Type: "array", Description: "Tools that must provide code scanning results for this rule to pass.", Variants: map[string]Field{
+							"code_scanning_tools": {Type: "array", Description: "Tools that must provide code scanning results for this rule to pass.", Match: []string{"tool"}, Variants: map[string]Field{
 								"": {Type: "object", Description: "A tool that must provide code scanning results for this rule to pass.", Fields: map[string]Field{
 									"alerts_threshold":          {Type: "string", Enum: []string{"all", "errors", "errors_and_warnings", "none"}, Description: "The severity level at which code scanning results that raise alerts block a reference update. For more information on alert severity levels, see \"[About code scanning alerts](https://docs.github.com/code-security/code-scanning/managing-code-scanning-alerts/about-code-scanning-alerts#about-alert-severity-and-security-severity-levels).\""},
 									"security_alerts_threshold": {Type: "string", Enum: []string{"all", "critical", "high_or_higher", "medium_or_higher", "none"}, Description: "The severity level at which code scanning results that raise security alerts block a reference update. For more information on security severity levels, see \"[About code scanning alerts](https://docs.github.com/code-security/code-scanning/managing-code-scanning-alerts/about-code-scanning-alerts#about-alert-severity-and-security-severity-levels).\""},
@@ -343,7 +353,7 @@ var generated = Node{
 							"allowed_merge_methods":         {Type: "array", Description: "Array of allowed merge methods. Allowed values include `merge`, `squash`, and `rebase`. At least one option must be enabled."},
 							"dismiss_stale_reviews_on_push": {Type: "boolean", Description: "New, reviewable commits pushed will dismiss previous pull request review approvals."},
 							"dismissal_restriction": {Type: "object", Description: "Specify people, teams, or apps allowed to dismiss pull request reviews.", Fields: map[string]Field{
-								"allowed_actors": {Type: "array", Description: "Specify people, teams, or apps allowed to dismiss pull request reviews.", Variants: map[string]Field{
+								"allowed_actors": {Type: "array", Description: "Specify people, teams, or apps allowed to dismiss pull request reviews.", Match: []string{"type", "id"}, Variants: map[string]Field{
 									"": {Type: "object", Description: "An actor allowed to dismiss pull request reviews", Fields: map[string]Field{
 										"id":   {Type: "integer", Description: "ID of the actor that can dismiss reviews."},
 										"type": {Type: "string", Enum: []string{"IntegrationInstallation", "RepositoryRole", "Team", "User"}, Description: "The type of the actor"},
@@ -355,7 +365,7 @@ var generated = Node{
 							"require_last_push_approval":        {Type: "boolean", Description: "Whether the most recent reviewable push must be approved by someone other than the person who pushed it."},
 							"required_approving_review_count":   {Type: "integer", Description: "The number of approving reviews that are required before a pull request can be merged."},
 							"required_review_thread_resolution": {Type: "boolean", Description: "All conversations on code must be resolved before a pull request can be merged."},
-							"required_reviewers": {Type: "array", Description: "> [!NOTE]\n> `required_reviewers` is in beta and subject to change.\n\nA collection of reviewers and associated file patterns. Each reviewer has a list of file patterns which determine the files that reviewer is required to review.", Variants: map[string]Field{
+							"required_reviewers": {Type: "array", Description: "> [!NOTE]\n> `required_reviewers` is in beta and subject to change.\n\nA collection of reviewers and associated file patterns. Each reviewer has a list of file patterns which determine the files that reviewer is required to review.", Match: []string{"reviewer.type", "reviewer.id"}, Variants: map[string]Field{
 								"": {Type: "object", Description: "A reviewing team, and file patterns describing which files they must approve changes to.", Fields: map[string]Field{
 									"file_patterns":     {Type: "array", Description: "Array of file patterns. Pull requests which change matching files must be approved by the specified team. File patterns use fnmatch syntax."},
 									"minimum_approvals": {Type: "integer", Description: "Minimum number of approvals required from the specified team. If set to zero, the team will be added to the pull request but approval is optional."},
@@ -383,7 +393,7 @@ var generated = Node{
 					"required_status_checks": {Type: "object", Description: "Choose which status checks must pass before the ref is updated. When enabled, commits must first be pushed to another ref where the checks pass.", Fields: map[string]Field{
 						"parameters": {Type: "object", Fields: map[string]Field{
 							"do_not_enforce_on_create": {Type: "boolean", Description: "Allow repositories and branches to be created if a check would otherwise prohibit it."},
-							"required_status_checks": {Type: "array", Description: "Status checks that are required.", Variants: map[string]Field{
+							"required_status_checks": {Type: "array", Description: "Status checks that are required.", Match: []string{"context", "integration_id"}, Variants: map[string]Field{
 								"": {Type: "object", Description: "Required status check", Fields: map[string]Field{
 									"context":        {Type: "string", Description: "The status check context name that must be present on the commit."},
 									"integration_id": {Type: "integer", Description: "The optional integration ID that this status check must originate from."},
@@ -411,7 +421,7 @@ var generated = Node{
 					"workflows": {Type: "object", Description: "Require all changes made to a targeted branch to pass the specified workflows before they can be merged.", Fields: map[string]Field{
 						"parameters": {Type: "object", Fields: map[string]Field{
 							"do_not_enforce_on_create": {Type: "boolean", Description: "Allow repositories and branches to be created if a check would otherwise prohibit it."},
-							"workflows": {Type: "array", Description: "Workflows that must pass for this rule to pass.", Variants: map[string]Field{
+							"workflows": {Type: "array", Description: "Workflows that must pass for this rule to pass.", Match: []string{"repository_id", "path", "ref"}, Variants: map[string]Field{
 								"": {Type: "object", Description: "A workflow that must run for this rule to pass", Fields: map[string]Field{
 									"path":          {Type: "string", Description: "The path to the workflow file"},
 									"ref":           {Type: "string", Description: "The ref (branch or tag) of the workflow file to use"},

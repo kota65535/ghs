@@ -27,7 +27,7 @@ type Labels struct{ GenericCollection }
 // declared under a new name is a different element, created and deleted like
 // any other, and `new_name` has no part to play in it.
 func (l Labels) Update(ctx context.Context, c Client, node schema.Node, path Path, current, desired map[string]any) error {
-	target, err := l.ElementPath(path, desired)
+	target, err := l.ElementPath(node, path, current)
 	if err != nil {
 		return err
 	}
