@@ -234,7 +234,22 @@ The set is what belongs to the repository itself. Rulesets an organization appli
 
 Labels are worth a word on both counts. GitHub gives a new repository nine of its own — `bug`, `documentation`, `enhancement` and the rest — and they belong to the repository, so writing `labels:` puts them under management like anything else: the ones the file does not list are deleted, and the plan says so before it happens. A label's `color` is written as the API reports it, six hexadecimal digits with no leading `#`.
 
-Changing a label's `name` is not a rename. An entry is matched on its name, so the old label is deleted and a new one created — and a deleted label comes off the issues and pull requests that carried it. The plan reports both halves, so you can see it coming. Rename in the GitHub UI first if you want the label to keep what it is attached to, then update the file to match.
+An entry is matched on its `name`, so read literally, an entry written under a new name is the old one deleted and a new one created. That loses more than it says: a deleted label comes off the issues and pull requests that carried it, and a ruleset created anew gets a new id. So where an entry differs from one GitHub reports **only** by name, ghs reads it as the rename it was meant to be and changes the name in place:
+
+```console
+$ ghs plan
+~ labels: [
+    ~ {
+        ~ name: "bug" -> "defect"
+      },
+  ]
+
+Plan: 1 to change.
+```
+
+This holds for labels, rulesets and variables. Environments cannot be renamed in place, so a new name there is always a delete and a create.
+
+Change anything else at the same time and there is nothing left to recognise the entry by, so the literal reading stands and the plan says so — one removed, one added. To rename and change something else, rename first, apply, then change the rest. The same goes for an entry that declares nothing but its name, and where two entries would each fit: if `bug` and `task` are both red and both are rewritten, no pairing is more right than the other, and ghs will not guess.
 
 Within an entry the usual rule holds: fields you leave out are not managed.
 

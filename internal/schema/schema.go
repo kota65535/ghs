@@ -173,6 +173,15 @@ type Node struct {
 	// GitHub issued for it, which the settings file does not hold.
 	Address string
 
+	// Rename is the field of an element's update request that carries a new
+	// value for Match, where the API changes it in place. It is empty where it
+	// cannot, and then a changed key is a delete and a create.
+	//
+	// Renaming in place keeps what GitHub holds about an element besides its
+	// settings: a label stays on the issues that carry it, a ruleset keeps its
+	// id and history.
+	Rename string
+
 	// Fields are the writable fields of this node, taken from the request body
 	// of its operation. For a collection they describe one element.
 	Fields map[string]Field

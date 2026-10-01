@@ -21,17 +21,24 @@ type Labels struct{ GenericCollection }
 // Update implements Collection.
 //
 // The declaration is shaped by the create body, because that is the operation
-// the fields are generated from, so it carries the name. Sending it to PATCH
-// would declare a field that request has no such thing as. Renaming is not what
-// it would ask for either: `name` is what an element is matched on, so a label
-// declared under a new name is a different element, created and deleted like
-// any other, and `new_name` has no part to play in it.
+// the fields are generated from, so it carries the name. PATCH has no such
+// field: the label being changed is named in the path, and the body names one
+// only to rename it, under the field the schema states as Rename.
+//
+// The path is built from the reported element, which holds the name GitHub
+// knows the label by. The two names differ only in a rename, which is what a
+// declaration under a new name is read as where nothing else about the label
+// changes -- see diff.PairRenames.
 func (l Labels) Update(ctx context.Context, c Client, node schema.Node, path Path, current, desired map[string]any) error {
 	target, err := l.ElementPath(node, path, current)
 	if err != nil {
 		return err
 	}
-	if err := send(ctx, c, http.MethodPatch, target.String(), withoutName(desired)); err != nil {
+	body := withoutName(desired)
+	if now := desired[node.Match]; now != current[node.Match] {
+		body[node.Rename] = now
+	}
+	if err := send(ctx, c, http.MethodPatch, target.String(), body); err != nil {
 		return fmt.Errorf("update %s: %w", target, err)
 	}
 	return nil

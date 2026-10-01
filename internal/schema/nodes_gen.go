@@ -147,6 +147,7 @@ var generated = Node{
 					Summary: "Create a repository variable",
 					Match:   "name",
 					Address: "name",
+					Rename:  "name",
 					// from POST /repos/{owner}/{repo}/actions/variables
 					Fields: map[string]Field{
 						"name":  {Type: "string", Description: "The name of the variable."},
@@ -185,6 +186,7 @@ var generated = Node{
 					Summary: "Create an environment variable",
 					Match:   "name",
 					Address: "name",
+					Rename:  "name",
 					// from POST /repos/{owner}/{repo}/environments/{environment_name}/variables
 					Fields: map[string]Field{
 						"name":  {Type: "string", Description: "The name of the variable."},
@@ -200,6 +202,7 @@ var generated = Node{
 			Summary: "Create a label",
 			Match:   "name",
 			Address: "name",
+			Rename:  "new_name",
 			// from POST /repos/{owner}/{repo}/labels
 			Fields: map[string]Field{
 				"color":       {Type: "string", Description: "The [hexadecimal color code](http://www.color-hex.com/) for the label, without the leading `#`."},
@@ -214,6 +217,7 @@ var generated = Node{
 			Summary: "Create a repository ruleset",
 			Match:   "name",
 			Address: "id",
+			Rename:  "name",
 			// from POST /repos/{owner}/{repo}/rulesets
 			Fields: map[string]Field{
 				"bypass_actors": {Type: "array", Description: "The actors that can bypass the rules in this ruleset", Match: []string{"actor_type", "actor_id"}, Variants: map[string]Field{

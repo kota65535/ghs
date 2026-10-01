@@ -161,7 +161,16 @@ func planElements(ctx context.Context, client resource.Client, key string, decla
 		current = read
 	}
 
-	for _, match := range diff.MatchElements(key, current, declared.Elements) {
+	matches := diff.MatchElements(key, current, declared.Elements)
+	// Where the API renames an element in place, a declaration under a new key
+	// that changes nothing else is read as the rename it was meant to be,
+	// rather than as a delete and a create that lose what GitHub holds about
+	// the element besides its settings.
+	if declared.Node.Rename != "" {
+		matches = diff.PairRenames(matches, declared.Node.Match, declared.Node.Matches())
+	}
+
+	for _, match := range matches {
 		element := diff.ElementDiff{
 			Name:    match.Name,
 			Path:    match.Path,
