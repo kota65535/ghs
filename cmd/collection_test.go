@@ -157,6 +157,48 @@ environments:
 	}
 }
 
+func TestApplyChangesAnEnvironmentBeforeItsBranchPolicies(t *testing.T) {
+	// A deployment branch policy only exists on an environment that allows
+	// custom ones, so declaring the setting and the policies together has to
+	// work: the environment is written first, and the policies follow it.
+	client := &fakeClient{reads: map[string]string{
+		"repos/kota65535/ghs/environments": `{"environments": [
+			{"id": 1, "name": "production", "deployment_branch_policy": {"protected_branches": true, "custom_branch_policies": false}}
+		]}`,
+		"repos/kota65535/ghs/environments/production/deployment-branch-policies": `{"branch_policies": []}`,
+	}}
+
+	p := planFor(t, client, `
+environments:
+  - name: production
+    deployment_branch_policy:
+      protected_branches: false
+      custom_branch_policies: true
+    deployment-branch-policies:
+      - name: release/*
+        type: branch
+`)
+
+	var out bytes.Buffer
+	if err := apply(context.Background(), &out, p, diff.FormatText); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+
+	want := []string{
+		"PUT repos/kota65535/ghs/environments/production",
+		"POST repos/kota65535/ghs/environments/production/deployment-branch-policies",
+	}
+	got := client.calls()
+	if len(got) != len(want) {
+		t.Fatalf("made %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("call %d = %q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
 func TestDeclaringAnEmptyCollectionDeletesEverything(t *testing.T) {
 	client := &fakeClient{reads: map[string]string{
 		"repos/kota65535/ghs/actions/variables": `{"variables": [

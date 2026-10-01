@@ -177,11 +177,34 @@ func TestSpecialCasesAreLookedUpByKey(t *testing.T) {
 	if _, generic := CollectionFor("environments").(GenericCollection); generic {
 		t.Error("environments got the general treatment, want its own: what it reports is not what declares it")
 	}
+	// A node below a collection element is reached by a key that names the
+	// element, and it is the same node whichever element that is.
+	if _, generic := CollectionFor(`environments["review/pr-1"].deployment-branch-policies`).(GenericCollection); generic {
+		t.Error("deployment branch policies got the general treatment, want their own: they are addressed by a server-issued id")
+	}
+	if _, generic := CollectionFor(`environments["staging"].variables`).(GenericCollection); !generic {
+		t.Error("an environment's variables did not get the general treatment, which is all they need")
+	}
 	if _, generic := CollectionFor("actions.variables").(GenericCollection); !generic {
 		t.Error("actions.variables did not get the general treatment, which is all it needs")
 	}
 	if _, generic := ObjectFor("actions.permissions").(GenericObject); !generic {
 		t.Error("actions.permissions did not get the general treatment, which is all it needs")
+	}
+}
+
+func TestNodeKeyDropsTheElementNames(t *testing.T) {
+	// The names are written with %q, so one holding a bracket or a quote does
+	// not end the element it names.
+	for key, want := range map[string]string{
+		"environments": "environments",
+		`environments["production"].deployment-branch-policies`: "environments.deployment-branch-policies",
+		`environments["pr[1]"].variables`:                       "environments.variables",
+		`environments["say \"hi\""].variables`:                  "environments.variables",
+	} {
+		if got := nodeKey(key); got != want {
+			t.Errorf("nodeKey(%q) = %q, want %q", key, got, want)
+		}
 	}
 }
 
