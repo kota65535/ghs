@@ -1,15 +1,17 @@
 name: autotag
 
 # A refreshed API description changes what ghs knows about, so every merge that
-# touches the generator input ships as a patch release. Tagging with a personal
-# access token is what lets the tag push start the release workflow -- a tag
-# pushed with the built-in GITHUB_TOKEN would not.
+# moves the pinned description commit (Renovate's digest updates) ships as a
+# patch release. Changes to the generator itself are features or fixes and are
+# versioned by hand, so gen/main.go is deliberately not a trigger. Tagging with
+# a personal access token is what lets the tag push start the release workflow
+# -- a tag pushed with the built-in GITHUB_TOKEN would not.
 
 on:
   push:
     branches: [main]
     paths:
-      - gen/**
+      - gen/openapi.ref
 
 permissions:
   contents: read
