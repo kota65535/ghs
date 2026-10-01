@@ -295,3 +295,24 @@ func TestMatchesAreKeyedByShape(t *testing.T) {
 		}
 	}
 }
+
+func TestRenameIsStatedWhereTheAPIRenamesInPlace(t *testing.T) {
+	// Rename names the field of the update body that carries a new key. It is
+	// stated only where an update can change the key: environments are
+	// addressed by the name PUT creates them under, so there is no renaming
+	// one.
+	for _, tc := range []struct {
+		keys   []string
+		rename string
+	}{
+		{[]string{"labels"}, "new_name"},
+		{[]string{"rulesets"}, "name"},
+		{[]string{"actions", "variables"}, "name"},
+		{[]string{"environments", "variables"}, "name"},
+		{[]string{"environments"}, ""},
+	} {
+		if got := at(t, tc.keys...).Rename; got != tc.rename {
+			t.Errorf("%v: Rename = %q, want %q", tc.keys, got, tc.rename)
+		}
+	}
+}

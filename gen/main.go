@@ -50,6 +50,11 @@ type operation struct {
 	// say what identifies an element, so each collection says it here.
 	match   string
 	address string
+
+	// rename is the field of the update request that carries a new value for
+	// match, where the API renames an element in place. Empty where it does
+	// not, which leaves a changed key to be a delete and a create.
+	rename string
 }
 
 // operations lists every node ghs generates a description for. Adding a
@@ -67,12 +72,12 @@ var operations = []operation{
 
 	{key: []string{"topics"}, path: "/repos/{owner}/{repo}/topics", method: "put", kind: "KindObject"},
 
-	{key: []string{"labels"}, path: "/repos/{owner}/{repo}/labels", method: "post", kind: "KindCollection", match: "name", address: "name"},
-	{key: []string{"rulesets"}, path: "/repos/{owner}/{repo}/rulesets", method: "post", kind: "KindCollection", match: "name", address: "id"},
+	{key: []string{"labels"}, path: "/repos/{owner}/{repo}/labels", method: "post", kind: "KindCollection", match: "name", address: "name", rename: "new_name"},
+	{key: []string{"rulesets"}, path: "/repos/{owner}/{repo}/rulesets", method: "post", kind: "KindCollection", match: "name", address: "id", rename: "name"},
 	{key: []string{"environments"}, path: "/repos/{owner}/{repo}/environments/{environment_name}", method: "put", kind: "KindCollection", match: "name", address: "name"},
-	{key: []string{"environments", "variables"}, path: "/repos/{owner}/{repo}/environments/{environment_name}/variables", method: "post", kind: "KindCollection", match: "name", address: "name"},
+	{key: []string{"environments", "variables"}, path: "/repos/{owner}/{repo}/environments/{environment_name}/variables", method: "post", kind: "KindCollection", match: "name", address: "name", rename: "name"},
 
-	{key: []string{"actions", "variables"}, path: "/repos/{owner}/{repo}/actions/variables", method: "post", kind: "KindCollection", match: "name", address: "name"},
+	{key: []string{"actions", "variables"}, path: "/repos/{owner}/{repo}/actions/variables", method: "post", kind: "KindCollection", match: "name", address: "name", rename: "name"},
 	{key: []string{"actions", "permissions"}, path: "/repos/{owner}/{repo}/actions/permissions", method: "put", kind: "KindObject"},
 	{key: []string{"actions", "permissions", "workflow"}, path: "/repos/{owner}/{repo}/actions/permissions/workflow", method: "put", kind: "KindObject"},
 	{key: []string{"actions", "permissions", "fork-pr-contributor-approval"}, path: "/repos/{owner}/{repo}/actions/permissions/fork-pr-contributor-approval", method: "put", kind: "KindObject", conditional: true},
@@ -240,6 +245,7 @@ type node struct {
 	conditional bool
 	match       string
 	address     string
+	rename      string
 	from        string // the operation it was generated from, for a comment
 
 	fields map[string]field
@@ -319,6 +325,7 @@ func buildTree(spec map[string]any) (*node, error) {
 		}
 		target.match = op.match
 		target.address = op.address
+		target.rename = op.rename
 		target.fields = c.properties(props, nil)
 		target.from = fmt.Sprintf("%s %s", strings.ToUpper(op.method), op.path)
 		// The root is where paths are measured from, so it adds nothing to
@@ -450,6 +457,9 @@ func writeNode(b *strings.Builder, n *node, depth int) {
 	}
 	if n.address != "" {
 		fmt.Fprintf(b, "%s\tAddress: %q,\n", indent, n.address)
+	}
+	if n.rename != "" {
+		fmt.Fprintf(b, "%s\tRename: %q,\n", indent, n.rename)
 	}
 
 	if len(n.fields) > 0 {
