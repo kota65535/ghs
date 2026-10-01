@@ -1,15 +1,17 @@
 name: autotag
 
 # A refreshed API description changes what ghs knows about, so every merge that
-# touches the generator input ships as a patch release. Tagging with a personal
-# access token is what lets the tag push start the release workflow -- a tag
-# pushed with the built-in GITHUB_TOKEN would not.
+# moves the pinned description commit (Renovate's digest updates) ships as a
+# patch release. Changes to the generator itself are features or fixes and are
+# versioned by hand, so gen/main.go is deliberately not a trigger. Tagging with
+# a personal access token is what lets the tag push start the release workflow
+# -- a tag pushed with the built-in GITHUB_TOKEN would not.
 
 on:
   push:
     branches: [main]
     paths:
-      - gen/**
+      - gen/openapi.ref
 
 permissions:
   contents: read
@@ -29,7 +31,10 @@ jobs:
 
       - name: Tag the next patch version
         run: |
-          latest=$(git describe --tags --abbrev=0 --match 'v[0-9]*' 2>/dev/null || echo v0.0.0)
+          # Highest reachable version, not the nearest one: a manual minor bump
+          # tagged on the same commit as an automatic patch tag must win.
+          latest=$(git tag --list 'v[0-9]*' --merged HEAD --sort=-v:refname | head -n1)
+          latest=${latest:-v0.0.0}
           next=$(echo "$latest" | awk -F. -v OFS=. '{ $3 += 1; print }')
           echo "Releasing $next (previous: $latest)"
           git tag "$next"
