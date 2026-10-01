@@ -35,4 +35,17 @@
       datasourceTemplate: 'git-refs',
     },
   ],
+
+  packageRules: [
+    {
+      // The description's main branch moves almost daily, and every merged
+      // update ships as a patch release, so take it once a week instead.
+      //
+      // minimumReleaseAge cannot do this: git-refs reports no release
+      // timestamps, which Renovate treats as never old enough, and the head
+      // of a branch that moves daily would never reach the age anyway.
+      matchDepNames: ['https://github.com/github/rest-api-description'],
+      extends: ['schedule:weekly'],
+    },
+  ],
 }
