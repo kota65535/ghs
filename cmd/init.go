@@ -110,7 +110,7 @@ func newInitCommand(global *globalOptions) *cobra.Command {
 		},
 	}
 
-	cmd.Flags().BoolVar(&force, "force", false, "overwrite the settings file if it exists")
+	cmd.Flags().BoolVarP(&force, "force", "f", false, "overwrite the settings file if it exists")
 	cmd.Flags().StringSliceVar(&resources, "resource", nil,
 		"resources to manage (\""+allKeyword+"\" or any of: "+
 			strings.Join(resourceKeys(), ", ")+")")

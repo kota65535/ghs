@@ -54,7 +54,7 @@ func Execute() int {
 		SilenceErrors: true,
 	}
 
-	root.PersistentFlags().StringVarP(&opts.file, "file", "f", "", "path to the settings file (default: "+config.DefaultPath+" at the repository root)")
+	root.PersistentFlags().StringVarP(&opts.file, "config", "c", "", "path to the settings file (default: "+config.DefaultPath+" at the repository root)")
 	root.PersistentFlags().StringVarP(&opts.repo, "repo", "R", "", "repository to manage, as owner/repo (default: the current repository)")
 
 	root.AddCommand(newInitCommand(&opts), newPlanCommand(&opts), newApplyCommand(&opts))
@@ -104,7 +104,7 @@ func loadConfig(opts *globalOptions) (*config.Declaration, error) {
 	return config.Load(settingsPath(opts.file))
 }
 
-// settingsPath is the settings file to use: the one --file names, or else
+// settingsPath is the settings file to use: the one --config names, or else
 // config.DefaultPath under the repository root. Outside a repository it is
 // relative to the current directory.
 func settingsPath(flag string) string {
