@@ -1,6 +1,7 @@
 package diff
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -241,28 +242,32 @@ func writeElements(w io.Writer, elements []ElementDiff, indent string, options r
 // The name is written without a sign, as the context it is: it identifies the
 // element rather than being part of what changes about it.
 func writeElementChanges(w io.Writer, element ElementDiff, indent string, options renderOptions) error {
-	width := fieldWidth(element.Fields, []string{NameField})
+	key := element.Key
+	if key == "" {
+		key = NameField
+	}
+	width := fieldWidth(element.Fields, []string{key})
 
 	// An element being renamed is identified by neither name on its own, so
 	// the name is written as the change it is, and written once.
-	if ordered, renamed := nameFirst(element.Fields); renamed {
+	if ordered, renamed := nameFirst(element.Fields, key); renamed {
 		return writeFieldChanges(w, ordered, indent, width, options)
 	}
 
 	_, err := fmt.Fprintf(w, "%s%s %-*s %s\n",
-		indent, noSign, width, NameField+":", formatValue(element.Name, false))
+		indent, noSign, width, key+":", formatValue(element.Name, false))
 	if err != nil {
 		return err
 	}
 	return writeFieldChanges(w, element.Fields, indent, width, options)
 }
 
-// nameFirst moves a changed name to the front of the fields, reporting whether
-// there was one to move. An element is matched on its name, so a name among
-// its changes is a rename and nothing else.
-func nameFirst(fields []Change) ([]Change, bool) {
+// nameFirst moves a changed key to the front of the fields, reporting whether
+// there was one to move. An element is matched on its key, so a key among its
+// changes is a rename and nothing else.
+func nameFirst(fields []Change, key string) ([]Change, bool) {
 	for i, change := range fields {
-		if change.Label != NameField {
+		if change.Label != key {
 			continue
 		}
 		ordered := make([]Change, 0, len(fields))
@@ -604,11 +609,17 @@ func formatValue(v any, missing bool) string {
 	if missing {
 		return missingLabel
 	}
-	b, err := json.Marshal(v)
-	if err != nil {
+	// Encoded rather than marshalled so that the HTML escaping can be turned
+	// off: an autolink's url_template contains <num>, and a plan that wrote it
+	// back as the escape sequence for those angle brackets would be asking the
+	// reader to decode the very thing they are reviewing.
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(v); err != nil {
 		return fmt.Sprintf("%v", v)
 	}
-	return string(b)
+	return strings.TrimSuffix(buf.String(), "\n")
 }
 
 // Summary counts a plan by object rather than by field: a node with four

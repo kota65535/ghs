@@ -28,6 +28,36 @@ actions:
 	}
 }
 
+func TestParseCollectionKeepsAutolinksByTheirPrefix(t *testing.T) {
+	// Nothing about an autolink is called a name. What identifies one is its
+	// key_prefix, which is the field the API takes, so that is what elements
+	// are keyed and located by.
+	cfg := mustParse(t, `
+autolinks:
+  - key_prefix: JIRA-
+    url_template: https://jira.example.com/browse/<num>
+`)
+
+	autolinks := child(t, cfg, "autolinks")
+	if autolinks.Elements["JIRA-"]["url_template"] != "https://jira.example.com/browse/<num>" {
+		t.Errorf("JIRA- = %+v, want its declared template", autolinks.Elements["JIRA-"])
+	}
+
+	_, err := parse(t, "autolinks:\n  - url_template: https://jira.example.com/browse/<num>\n")
+	if err == nil || !strings.Contains(err.Error(), "key_prefix is required") {
+		t.Errorf("err = %v, want the key_prefix asked for rather than a name", err)
+	}
+
+	_, err = parse(t, `
+autolinks:
+  - key_prefix: JIRA-
+    url_templat: https://jira.example.com/browse/<num>
+`)
+	if err == nil || !strings.Contains(err.Error(), `autolinks["JIRA-"].url_templat`) {
+		t.Errorf("err = %v, want the typo reported under the prefix it is in", err)
+	}
+}
+
 func TestParseCollectionAcceptsAnEmptySequence(t *testing.T) {
 	// "rulesets: []" declares a set with no members, which is what asks for
 	// every existing one to be deleted. It is not the same as leaving the key

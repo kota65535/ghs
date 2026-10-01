@@ -72,6 +72,10 @@ var operations = []operation{
 
 	{key: []string{"topics"}, path: "/repos/{owner}/{repo}/topics", method: "put", kind: "KindObject"},
 
+	// An autolink is identified by the prefix it matches and addressed by the
+	// id GitHub issues. There is no update endpoint, so nothing renames one.
+	{key: []string{"autolinks"}, path: "/repos/{owner}/{repo}/autolinks", method: "post", kind: "KindCollection", conditional: true, match: "key_prefix", address: "id"},
+
 	{key: []string{"labels"}, path: "/repos/{owner}/{repo}/labels", method: "post", kind: "KindCollection", match: "name", address: "name", rename: "new_name"},
 	{key: []string{"rulesets"}, path: "/repos/{owner}/{repo}/rulesets", method: "post", kind: "KindCollection", match: "name", address: "id", rename: "name"},
 	{key: []string{"environments"}, path: "/repos/{owner}/{repo}/environments/{environment_name}", method: "put", kind: "KindCollection", match: "name", address: "name"},

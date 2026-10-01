@@ -275,6 +275,12 @@ func isNotFound(err error) bool {
 // GitHub answers 409 where the allowed actions are not being selected, and 422
 // where a setting is for private repositories only. Both say the same thing:
 // there is nothing here to read.
+//
+// 403 is not among them. A node being out of reach is not the same as its
+// having nothing to report, and reading the two alike would have a token short
+// of a permission report settings as absent. Where a 403 does mean absence --
+// autolinks, which GitHub Free does not have -- it is read that way by the
+// resource that knows it, not here.
 func doesNotApply(err error) bool {
 	var httpErr *api.HTTPError
 	if !errors.As(err, &httpErr) {
@@ -286,3 +292,10 @@ func doesNotApply(err error) bool {
 // escape makes a name safe to put in a path. Environment names allow
 // characters that mean something in a URL.
 func escape(name string) string { return url.PathEscape(name) }
+
+// isForbidden reports the 403 GitHub answers where a feature is not part of
+// the repository's plan.
+func isForbidden(err error) bool {
+	var httpErr *api.HTTPError
+	return errors.As(err, &httpErr) && httpErr.StatusCode == http.StatusForbidden
+}
